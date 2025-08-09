@@ -91,6 +91,26 @@ public class Command {
                                                                 StringArgumentType.getString(ctx, "backup_file"))))
                                         )))
                 )
+                .then(Commands.literal("world_list")
+                        .then(Commands.argument("config_id", IntegerArgumentType.integer())
+                                .then(Commands.argument("world_index", IntegerArgumentType.integer())
+                                        .executes(ctx -> {
+                                            CommandSourceStack source = ctx.getSource();
+                                            int configId = IntegerArgumentType.getInteger(ctx, "config_id");
+                                            int worldIndex = IntegerArgumentType.getInteger(ctx, "world_index");
+
+                                            source.sendSuccess(() -> Component.literal(
+                                                            String.format("§e正在从 MineBackup 获取配置 %d 中世界 %d 的备份列表...", configId, worldIndex)),
+                                                    false);
+
+                                            String command = String.format("LIST_WORLDS %d %d", configId, worldIndex);
+                                            OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command)
+                                                    .thenAccept(response -> handleWorldListResponse(source, response, configId, worldIndex));
+                                            return 1;
+                                        })
+                                )
+                        )
+                )
         );
     }
 
@@ -134,6 +154,48 @@ public class Command {
                 source.sendSuccess(() -> resultText, false);
             } else {
                 source.sendFailure(Component.literal("§c收到了未知响应: " + response));
+            }
+        });
+    }
+
+    private static void handleWorldListResponse(CommandSourceStack source, String response, int configId, int worldIndex) {
+        source.getServer().execute(() -> {
+            if (response == null) {
+                source.sendFailure(Component.literal("§c获取备份列表失败: 无响应"));
+                return;
+            }
+
+            // 处理C++中定义的错误情况
+            if (response.startsWith("ERROR:")) {
+                String errorMsg = response.substring(6);
+                if (errorMsg.contains("配置索引错误")) {
+                    source.sendFailure(Component.literal("§c配置索引错误: 不存在ID为 " + configId + " 的配置"));
+                } else if (errorMsg.contains("世界索引错误")) {
+                    source.sendFailure(Component.literal("§c世界索引错误: 配置 " + configId + " 中不存在索引为 " + worldIndex + " 的世界"));
+                } else {
+                    source.sendFailure(Component.literal("§c获取失败: " + errorMsg));
+                }
+                return;
+            }
+
+            // 处理成功响应（对应C++的OK:格式）
+            if (response.startsWith("OK:")) {
+                MutableComponent resultText = Component.literal(
+                        String.format("§a配置 %d 中世界 %d 的备份列表:\n", configId, worldIndex));
+                String data = response.substring(3);
+
+                if (data.isEmpty()) {
+                    resultText.append(Component.literal("§7(该世界暂无备份文件)"));
+                } else {
+                    String[] files = data.split(";");
+                    for (int i = 0; i < files.length; i++) {
+                        resultText.append(Component.literal(
+                                String.format("§f - 备份 %d: §b%s\n", i + 1, files[i])));
+                    }
+                }
+                source.sendSuccess(() -> resultText, false);
+            } else {
+                source.sendFailure(Component.literal("§c收到未知响应: " + response));
             }
         });
     }
