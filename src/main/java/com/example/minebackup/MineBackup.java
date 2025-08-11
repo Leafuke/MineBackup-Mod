@@ -85,16 +85,30 @@ public class MineBackup
 
         Component message = null;
         switch (eventType) {
+            case "backup_started":
+                message = Component.literal(
+                        String.format("§6[MineBackup] §e世界 '%s' 的备份任务已开始...",
+                                eventData.getOrDefault("world", "未知世界"))
+                );
+                break;
+            case "restore_started":
+                message = Component.literal(
+                        String.format("§6[MineBackup] §e世界 '%s' 的还原任务已开始...",
+                                eventData.getOrDefault("world", "未知世界"))
+                );
+                break;
+
+            // (优化) 任务成功/失败的响应
             case "backup_success":
                 message = Component.literal(
-                        String.format("§a[MineBackup] 备份成功: §e%s §a已保存为 §f%s",
+                        String.format("§a[MineBackup] §2备份成功! §e世界 '%s' §a已保存为 §f%s",
                                 eventData.getOrDefault("world", "未知世界"),
                                 eventData.getOrDefault("file", "未知文件"))
                 );
                 break;
             case "backup_failed":
                 message = Component.literal(
-                        String.format("§c[MineBackup] 备份失败: §e%s. 原因: %s",
+                        String.format("§c[MineBackup] §4备份失败! §e世界 '%s'. §c原因: %s",
                                 eventData.getOrDefault("world", "未知世界"),
                                 eventData.getOrDefault("error", "未知错误"))
                 );
@@ -104,6 +118,8 @@ public class MineBackup
                 serverInstance.execute(() -> {
                     LOGGER.info("Executing immediate save for pre_hot_backup event.");
                     String worldName = eventData.getOrDefault("world", "未知世界");
+
+                    boolean allSaved = serverInstance.saveAllChunks(true, true, true);
 
                     // 广播一个保存中的提示
                     serverInstance.getPlayerList().broadcastSystemMessage(Component.literal(String.format("§6[MineBackup] §e收到热备份请求，正在为世界 '%s' 保存最新数据...", worldName)), false);
