@@ -1,6 +1,6 @@
-package com.example.minebackup;
+package com.Leafuke.minebackup;
 
-import com.example.minebackup.knotlink.OpenSocketQuerier;
+import com.Leafuke.minebackup.knotlink.OpenSocketQuerier;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;

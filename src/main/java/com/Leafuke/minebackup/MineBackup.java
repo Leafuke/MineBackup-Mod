@@ -1,4 +1,4 @@
-package com.example.minebackup;
+package com.Leafuke.minebackup;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
@@ -17,17 +17,12 @@ import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.slf4j.Logger;
-import com.mojang.brigadier.CommandDispatcher;
-import net.minecraft.commands.Commands;
-import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 
-import com.example.minebackup.knotlink.OpenSocketResponser;
 import net.minecraft.server.MinecraftServer;
 import net.minecraftforge.event.server.ServerStoppingEvent;
-import com.example.minebackup.knotlink.SignalSubscriber;
+import com.Leafuke.minebackup.knotlink.SignalSubscriber;
 
-import java.util.EventObject;
 import java.util.HashMap;
 import java.util.Map;
 
