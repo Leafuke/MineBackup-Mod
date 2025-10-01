@@ -1,0 +1,13 @@
+{
+  "itemGroup.minebackup": "Example Mod Tab",
+  "block.minebackup.example_block": "Example Block",
+  "item.minebackup.example_item": "Example Item",
+
+  "minebackup.configuration.title": "MineBackup Configs",
+  "minebackup.configuration.section.minebackup.common.toml": "MineBackup Configs",
+  "minebackup.configuration.section.minebackup.common.toml.title": "MineBackup Configs",
+  "minebackup.configuration.items": "Item List",
+  "minebackup.configuration.logDirtBlock": "Log Dirt Block",
+  "minebackup.configuration.magicNumberIntroduction": "Magic Number Text",
+  "minebackup.configuration.magicNumber": "Magic Number"
+}

@@ -1,0 +1,35 @@
+# 默认忽略的文件
+/shelf/
+/workspace.xml
+# eclipse
+bin
+*.launch
+.settings
+.metadata
+.classpath
+.project
+
+# idea
+out
+*.ipr
+*.iws
+*.iml
+*.idea
+*.zip
+*.7z
+
+# gradle
+build
+.gradle
+
+# other
+eclipse
+run
+*.log
+*.txt
+*.jar
+*.yml
+*.xml
+
+# Files from Forge MDK
+forge*changelog.txt
