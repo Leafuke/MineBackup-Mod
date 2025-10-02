@@ -1,4 +1,6 @@
 ![Forge Version](https://img.shields.io/badge/Forge-1.20.1%2B-blue?logo=minecraft)
+![Fabric Version](https://img.shields.io/badge/Fabric-1.20.1%2B-blue?logo=minecraft)
+![Neoforge Version](https://img.shields.io/badge/Neoforge-1.20.1%2B-blue?logo=minecraft)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ---
@@ -6,7 +8,7 @@
 ### **⚠️ 重要提示：这是联动模组！**
 
 请注意：本模组是 **MineBackup 主程序**的联动组件，**无法独立运行**。您必须先下载并运行主程序，本模组才能正常工作。
-
+并且为了程序间正常的通信，电脑上需要存在 KnotLink 服务端。https://github.com/hxh230802/KnotLink
 
 ### **➡️ [点此下载必需的 MineBackup 主程序](https://github.com/Leafuke/MineBackup/releases)**
 
