@@ -18,31 +18,16 @@ repositories {
 	// for more information about repositories.
 }
 
-//dependencies { 看上去要求羊皮纸映射了，到时候搞一下。
-//	// To change the versions see the gradle.properties file
-//	minecraft "com.mojang:minecraft:${project.minecraft_version}"
-//	mappings loom.officialMojangMappings()
-//	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-//
-//	// Fabric API. This is technically optional, but you probably want it anyway.
-////	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-//
-//}
-//dependencies {
-//    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-//    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-//    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-//
-//    // === 关键修改在这里 ===
-//    // 移除任何单一的 "fabric-api" 依赖
-//    // 添加以下独立的模块，这能确保所有需要的类都被正确加载
-//    modImplementation "net.fabricmc.fabric-api:fabric-api-base:${project.fabric_version}"
-//    modImplementation "net.fabricmc.fabric-api:fabric-command-api-v1:${project.fabric_version}"
-//    modImplementation "net.fabricmc.fabric-api:fabric-lifecycle-events-v1:${project.fabric_version}"
-//
-//    // 如果您之前是这样写的，请删除它:
-//    // modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-//}
+dependencies {
+	// To change the versions see the gradle.properties file
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	// Fabric API. This is technically optional, but you probably want it anyway.
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+	
+}
 
 processResources {
 	inputs.property "version", project.version

@@ -102,7 +102,7 @@ minecraft {
         }
 
         data {
-            // example of overriding the workingDirectory set in configureEach above
+            // leafuke of overriding the workingDirectory set in configureEach above
             workingDirectory project.file('run-data')
 
             // Specify the modid for data generation, where to output the resulting resource, and where to look for existing resources.

@@ -6,193 +6,270 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.TextComponent;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.CommandManager;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.LiteralText;
-import net.minecraft.text.MutableText;
+import net.minecraft.server.level.ServerLevel;
+
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 public class Command {
 
+    // 与 C++ KnotLink Responser 匹配的ID
     private static final String QUERIER_APP_ID = "0x00000020";
     private static final String QUERIER_SOCKET_ID = "0x00000010";
 
-    public static void register(CommandDispatcher<ServerCommandSource> dispatcher) {
+    public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
 
-        dispatcher.register(CommandManager.literal("minebackup")
-                        .requires(src -> src.hasPermissionLevel(2))
+        dispatcher.register(Commands.literal("minebackup")
+                .requires(src -> src.hasPermission(2)) // 需要OP权限
 
-                        .then(CommandManager.literal("save")
+                // 1. 本地保存指令
+                .then(Commands.literal("save")
+                        .executes(ctx -> {
+                            CommandSourceStack source = ctx.getSource();
+                            MinecraftServer server = source.getServer();
+                            source.sendSuccess(new TextComponent("§6[MineBackup] §e正在执行本地世界保存..."), true);
+                            for (ServerLevel level : server.getAllLevels()) {
+                                level.save(null, true, false);
+                            }
+                            source.sendSuccess(new TextComponent("§a[MineBackup] §e本地世界保存成功。"), true);
+                            return 1;
+                        })
+                )
+
+                // 2. 查询配置列表
+                .then(Commands.literal("list_configs")
+                        .executes(ctx -> {
+                            ctx.getSource().sendSuccess(new TextComponent("§e正在从 MineBackup 获取配置列表..."), false);
+                            queryBackend("LIST_CONFIGS", response -> handleListConfigsResponse(ctx.getSource(), response));
+                            return 1;
+                        })
+                )
+
+                // 3. (修正) 列出指定配置中的所有世界
+                .then(Commands.literal("list_worlds")
+                        .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .executes(ctx -> {
-                                    ServerCommandSource source = ctx.getSource();
-                                    MinecraftServer server = source.getServer();
-                                    source.sendFeedback(new LiteralText("§6[MineBackup] §e正在执行本地世界保存..."), true);
-                                    for (ServerWorld level : server.getWorlds()) {
-                                        level.save(null, true, false);
-                                    }
-                                    source.sendFeedback(new LiteralText("§a[MineBackup] §e本地世界保存成功。"), true);
+                                    int configId = IntegerArgumentType.getInteger(ctx, "config_id");
+                                    ctx.getSource().sendSuccess(new TextComponent(String.format("§e正在获取配置 %d 的世界列表...", configId)), false);
+                                    queryBackend(
+                                            String.format("LIST_WORLDS %d", configId),
+                                            response -> handleListWorldsResponse(ctx.getSource(), response, configId)
+                                    );
                                     return 1;
                                 })
                         )
-                        .then(CommandManager.literal("list_configs")
-                                .executes(ctx -> {
-                                    ctx.getSource().sendFeedback(new LiteralText("§e正在从 MineBackup 获取配置列表..."), false);
-                                    queryBackend("LIST_CONFIGS", response -> handleListConfigsResponse(ctx.getSource(), response));
-                                    return 1;
-                                })
-                        )
-                        .then(CommandManager.literal("list_worlds")
-                                .then(CommandManager.argument("config_id", IntegerArgumentType.integer())
+                )
+
+                // 4. 列出指定世界的所有备份文件
+                .then(Commands.literal("list_backups")
+                        .then(Commands.argument("config_id", IntegerArgumentType.integer())
+                                .then(Commands.argument("world_index", IntegerArgumentType.integer())
                                         .executes(ctx -> {
                                             int configId = IntegerArgumentType.getInteger(ctx, "config_id");
-                                            ctx.getSource().sendFeedback(new LiteralText(String.format("§e正在获取配置 %d 的世界列表...", configId)), false);
+                                            int worldIndex = IntegerArgumentType.getInteger(ctx, "world_index");
+                                            ctx.getSource().sendSuccess(new TextComponent(String.format("§e正在获取配置 %d, 世界 %d 的备份列表...", configId, worldIndex)), false);
                                             queryBackend(
-                                                    String.format("LIST_WORLDS %d", configId),
-                                                    response -> handleListWorldsResponse(ctx.getSource(), response, configId)
+                                                    String.format("LIST_BACKUPS %d %d", configId, worldIndex),
+                                                    response -> handleListBackupsResponse(ctx.getSource(), response, configId, worldIndex)
                                             );
                                             return 1;
                                         })
                                 )
                         )
-                        .then(CommandManager.literal("list_backups")
-                                .then(CommandManager.argument("config_id", IntegerArgumentType.integer())
-                                        .then(CommandManager.argument("world_index", IntegerArgumentType.integer())
-                                                .executes(ctx -> {
-                                                    int configId = IntegerArgumentType.getInteger(ctx, "config_id");
-                                                    int worldIndex = IntegerArgumentType.getInteger(ctx, "world_index");
-                                                    ctx.getSource().sendFeedback(new LiteralText(String.format("§e正在获取配置 %d, 世界 %d 的备份列表...", configId, worldIndex)), false);
-                                                    queryBackend(
-                                                            String.format("LIST_BACKUPS %d %d", configId, worldIndex),
-                                                            response -> handleListBackupsResponse(ctx.getSource(), response, configId, worldIndex)
-                                                    );
-                                                    return 1;
-                                                })
-                                        )
-                                )
-                        )
-                        // ... 完整的指令树，下面的代码确认无误 ...
-                        .then(CommandManager.literal("backup")
-                                .then(CommandManager.argument("config_id", IntegerArgumentType.integer())
-                                        .then(CommandManager.argument("world_index", IntegerArgumentType.integer())
-                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
-                                                        String.format("BACKUP %d %d",
-                                                                IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                                IntegerArgumentType.getInteger(ctx, "world_index"))))
-                                                .then(CommandManager.argument("comment", StringArgumentType.greedyString())
-                                                        .executes(ctx -> executeRemoteCommand(ctx.getSource(),
-                                                                String.format("BACKUP %d %d %s",
-                                                                        IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                                        IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                                        StringArgumentType.getString(ctx, "comment"))))
-                                                )
-                                        )
-                                )
-                        )
-                        .then(CommandManager.literal("restore")
-                                .then(CommandManager.argument("config_id", IntegerArgumentType.integer())
-                                        .then(CommandManager.argument("world_index", IntegerArgumentType.integer())
-                                                .then(CommandManager.argument("backup_file", StringArgumentType.string())
-                                                        .suggests((ctx, builder) -> suggestBackupFiles(
+                )
+
+                // 5. 触发一次远程备份
+                .then(Commands.literal("backup")
+                        .then(Commands.argument("config_id", IntegerArgumentType.integer())
+                                .then(Commands.argument("world_index", IntegerArgumentType.integer())
+                                        .executes(ctx -> executeRemoteCommand(ctx.getSource(), // 不带评论
+                                                String.format("BACKUP %d %d",
+                                                        IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                        IntegerArgumentType.getInteger(ctx, "world_index"))))
+                                        .then(Commands.argument("comment", StringArgumentType.greedyString())
+                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(), // 带评论
+                                                        String.format("BACKUP %d %d %s",
                                                                 IntegerArgumentType.getInteger(ctx, "config_id"),
                                                                 IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                                builder))
-                                                        .executes(ctx -> executeRemoteCommand(ctx.getSource(),
-                                                                String.format("RESTORE %d %d %s",
-                                                                        IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                                        IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                                        StringArgumentType.getString(ctx, "backup_file"))))
-                                                )
+                                                                StringArgumentType.getString(ctx, "comment"))))
                                         )
                                 )
                         )
-                //... (其他指令，如quicksave, auto, stop等，逻辑不变)
+                )
+
+                // 6. (修正自动补全) 执行一次远程还原
+                .then(Commands.literal("restore")
+                        .then(Commands.argument("config_id", IntegerArgumentType.integer())
+                                .then(Commands.argument("world_index", IntegerArgumentType.integer())
+                                        .then(Commands.argument("backup_file", StringArgumentType.string())
+                                                .suggests((ctx, builder) -> suggestBackupFiles( // 自动补全
+                                                        IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                        IntegerArgumentType.getInteger(ctx, "world_index"),
+                                                        builder))
+                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
+                                                        String.format("RESTORE %d %d %s",
+                                                                IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                                IntegerArgumentType.getInteger(ctx, "world_index"),
+                                                                StringArgumentType.getString(ctx, "backup_file"))))
+                                        )
+                                )
+                        )
+                )
+
+                // 7. 执行被封当前存档的操作
+                .then(Commands.literal("quicksave")
+                        .executes(ctx -> {
+                            CommandSourceStack source = ctx.getSource();
+                            MinecraftServer server = source.getServer();
+                            source.sendSuccess(new TextComponent("§6[MineBackup] §e正在执行本地世界保存..."), true);
+                            for (ServerLevel level : server.getAllLevels()) {
+                                level.save(null, true, false);
+                            }
+                            source.sendSuccess(new TextComponent("§a[MineBackup] §e本地世界保存成功。"), true);
+                            // 修正：在1.18.2中，一个executes不能链式调用另一个，需要分开或者合并逻辑
+                            executeRemoteCommand(source, "BACKUP_CURRENT");
+                            return 1;
+                        })
+                        .then(Commands.argument("comment", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    CommandSourceStack source = ctx.getSource();
+                                    MinecraftServer server = source.getServer();
+                                    source.sendSuccess(new TextComponent("§6[MineBackup] §e正在执行本地世界保存..."), true);
+                                    for (ServerLevel level : server.getAllLevels()) {
+                                        level.save(null, true, false);
+                                    }
+                                    source.sendSuccess(new TextComponent("§a[MineBackup] §e本地世界保存成功。"), true);
+                                    executeRemoteCommand(source, String.format("BACKUP_CURRENT %s", StringArgumentType.getString(ctx, "comment")));
+                                    return 1;
+                                })
+                        )
+                )
+
+                // 8. 启动远程自动备份
+                .then(Commands.literal("auto")
+                        .then(Commands.argument("config_id", IntegerArgumentType.integer())
+                                .then(Commands.argument("world_index", IntegerArgumentType.integer())
+                                        .then(Commands.argument("internal_time", IntegerArgumentType.integer())
+                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
+                                                        String.format("AUTO_BACKUP %d %d %d",
+                                                                IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                                IntegerArgumentType.getInteger(ctx, "world_index"),
+                                                                IntegerArgumentType.getInteger(ctx, "internal_time"))))
+                                        )
+                                )
+                        )
+                )
+
+                // 9. 停止远程自动备份
+                .then(Commands.literal("stop")
+                        .then(Commands.argument("config_id", IntegerArgumentType.integer())
+                                .then(Commands.argument("world_index", IntegerArgumentType.integer())
+                                        .executes(ctx -> executeRemoteCommand(ctx.getSource(),
+                                                String.format("STOP_AUTO_BACKUP %d %d",
+                                                        IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                        IntegerArgumentType.getInteger(ctx, "world_index"))))
+                                )
+                        )
+                )
         );
     }
 
-    private static void queryBackend(String command, java.util.function.Consumer<String> callback) {
+    // 统一的查询后端方法
+    private static void queryBackend(String command, Consumer<String> callback) {
         OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command).thenAccept(callback);
     }
 
-    private static int executeRemoteCommand(ServerCommandSource source, String command) {
-        source.sendFeedback(new LiteralText("§e向 MineBackup 发送指令: §f" + command), false);
+    // 统一处理需要通用响应的远程命令
+    private static int executeRemoteCommand(CommandSourceStack source, String command) {
+        source.sendSuccess(new TextComponent("§e向 MineBackup 发送指令: §f" + command), false);
         queryBackend(command, response -> {
             source.getServer().execute(() -> {
                 if (response != null && response.startsWith("ERROR:")) {
-                    source.sendError(new LiteralText("§c指令失败: " + response.substring(6)));
+                    source.sendFailure(new TextComponent("§c指令失败: " + response.substring(6)));
                 } else {
-                    source.sendFeedback(new LiteralText("§aMineBackup 响应: §f" + response), false);
+                    // 成功消息由广播事件处理，这里只显示通用响应
+                    source.sendSuccess(new TextComponent("§aMineBackup 响应: §f" + response), false);
                 }
             });
         });
         return 1;
     }
 
-    private static void handleListConfigsResponse(ServerCommandSource source, String response) {
+    // 处理 LIST_CONFIGS 的响应
+    private static void handleListConfigsResponse(CommandSourceStack source, String response) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendError(new LiteralText("§c获取配置失败: " + (response != null ? response : "无响应")));
+                source.sendFailure(new TextComponent("§c获取配置失败: " + (response != null ? response : "无响应")));
                 return;
             }
-            MutableText resultText = new LiteralText("§a可用配置列表:\n");
+            MutableComponent resultText = new TextComponent("§a可用配置列表:\n");
             String data = response.substring(3);
             if (data.isEmpty()) {
-                resultText.append(new LiteralText("§7(无可用配置)"));
+                resultText.append(new TextComponent("§7(无可用配置)"));
             } else {
                 for (String config : data.split(";")) {
                     String[] parts = config.split(",", 2);
                     if (parts.length == 2) {
-                        resultText.append(new LiteralText(String.format("§f - ID: §b%s§f, 名称: §d%s\n", parts[0], parts[1])));
+                        resultText.append(new TextComponent(String.format("§f - ID: §b%s§f, 名称: §d%s\n", parts[0], parts[1])));
                     }
                 }
             }
-            source.sendFeedback(resultText, false);
+            source.sendSuccess(resultText, false);
         });
     }
 
-    private static void handleListWorldsResponse(ServerCommandSource source, String response, int configId) {
+    // 处理 LIST_WORLDS 的响应
+    private static void handleListWorldsResponse(CommandSourceStack source, String response, int configId) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendError(new LiteralText("§c获取世界列表失败: " + (response != null ? response : "无响应")));
+                source.sendFailure(new TextComponent("§c获取世界列表失败: " + (response != null ? response : "无响应")));
                 return;
             }
-            MutableText resultText = new LiteralText(String.format("§a配置 %d 的世界列表:\n", configId));
+            MutableComponent resultText = new TextComponent(String.format("§a配置 %d 的世界列表:\n", configId));
             String data = response.substring(3);
             if (data.isEmpty()) {
-                resultText.append(new LiteralText("§7(该配置下无世界)"));
+                resultText.append(new TextComponent("§7(该配置下无世界)"));
             } else {
                 String[] worlds = data.split(";");
                 for (int i = 0; i < worlds.length; i++) {
-                    resultText.append(new LiteralText(String.format("§f - 索引: §b%d§f, 名称: §d%s\n", i, worlds[i])));
+                    resultText.append(new TextComponent(String.format("§f - 索引: §b%d§f, 名称: §d%s\n", i, worlds[i])));
                 }
             }
-            source.sendFeedback(resultText, false);
+            source.sendSuccess(resultText, false);
         });
     }
 
-    private static void handleListBackupsResponse(ServerCommandSource source, String response, int configId, int worldIndex) {
+    // 处理 LIST_BACKUPS 的响应
+    private static void handleListBackupsResponse(CommandSourceStack source, String response, int configId, int worldIndex) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendError(new LiteralText("§c获取备份列表失败: " + (response != null ? response : "无响应")));
+                source.sendFailure(new TextComponent("§c获取备份列表失败: " + (response != null ? response : "无响应")));
                 return;
             }
-            MutableText resultText = new LiteralText(String.format("§a配置 %d, 世界 %d 的备份列表:\n", configId, worldIndex));
+            MutableComponent resultText = new TextComponent(String.format("§a配置 %d, 世界 %d 的备份列表:\n", configId, worldIndex));
             String data = response.substring(3);
             if (data.isEmpty()) {
-                resultText.append(new LiteralText("§7(该世界暂无备份)"));
+                resultText.append(new TextComponent("§7(该世界暂无备份)"));
             } else {
                 for (String file : data.split(";")) {
                     if (!file.isEmpty()) {
-                        resultText.append(new LiteralText("§f - §b" + file + "\n"));
+                        resultText.append(new TextComponent("§f - §b" + file + "\n"));
                     }
                 }
             }
-            source.sendFeedback(resultText, false);
+            source.sendSuccess(resultText, false);
         });
     }
 
+
+    // 为 "restore" 指令提供备份文件名的自动补全建议
     private static CompletableFuture<Suggestions> suggestBackupFiles(int configId, int worldIndex, SuggestionsBuilder builder) {
+        // 调用正确的 LIST_BACKUPS 命令
         String command = String.format("LIST_BACKUPS %d %d", configId, worldIndex);
         return OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command)
                 .thenApply(response -> {
