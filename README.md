@@ -1,4 +1,6 @@
 ![Forge Version](https://img.shields.io/badge/Forge-1.20.1%2B-blue?logo=minecraft)
+![Fabric Version](https://img.shields.io/badge/Fabric-1.20.1%2B-blue?logo=minecraft)
+![Neoforge Version](https://img.shields.io/badge/Neoforge-1.20.1%2B-blue?logo=minecraft)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ---
@@ -6,8 +8,7 @@
 ### **⚠️ 重要提示：这是联动模组！**
 
 请注意：本模组是 **MineBackup 主程序**的联动组件，**无法独立运行**。您必须先下载并运行主程序，本模组才能正常工作。
-
-目前仍然在测试，所以只做了forge 1.20.1 的版本。
+并且为了程序间正常的通信，电脑上需要存在 KnotLink 服务端。https://github.com/hxh230802/KnotLink/releases
 
 ### **➡️ [点此下载必需的 MineBackup 主程序](https://github.com/Leafuke/MineBackup/releases)**
 
@@ -42,6 +43,9 @@
 | **/minebackup list_backups** | `<config_id> <world_index>` | 列出指定世界的所有可用备份文件。 |
 | **/minebackup backup** | `<config_id> <world_index> [注释]` | 命令主程序为指定世界创建一次备份。可以附上一段可选的注释。 |
 | **/minebackup restore** | `<config_id> <world_index> <文件名>` | 命令主程序用指定的备份文件来还原世界。**这是一个危险操作，会覆盖你当前的世界！** |
+| **/minebackup auto** | `<config_id> <world_index> <internal_time>` | 请求 MineBackup 执行自动备份任务，间隔 internal_time 分钟进行自动备份 |
+| **/minebackup stop** | `<config_id> <world_index>` | 请求 MineBackup 停止自动备份任务 |
+| **/minebackup quicksave** | (无) | 为当前世界执行备份 |
 
 ### **💡 使用示例**
 
