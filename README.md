@@ -2,81 +2,83 @@
 ![Fabric Version](https://img.shields.io/badge/Fabric-1.20.1%2B-blue?logo=minecraft)
 ![Neoforge Version](https://img.shields.io/badge/Neoforge-1.20.1%2B-blue?logo=minecraft)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
+[![中文说明](https://img.shields.io/badge/README-中文-blue)](README-zh.md)
 
 ---
 
-### **⚠️ 重要提示：这是联动模组！**
+### **⚠️ Important: This is a Companion Mod!**
 
-请注意：本模组是 **MineBackup 主程序**的联动组件，**无法独立运行**。您必须先下载并运行主程序，本模组才能正常工作。
-并且为了程序间正常的通信，电脑上需要存在 KnotLink 服务端。https://github.com/hxh230802/KnotLink/releases
+Please note: This mod is a **companion component** for the **MineBackup desktop application** and **cannot function independently**. You must first download and run the main application for this mod to work properly.
 
-### **➡️ [点此下载必需的 MineBackup 主程序](https://github.com/Leafuke/MineBackup/releases)**
+Additionally, for proper inter-process communication, the KnotLink server must be installed on your computer. https://github.com/hxh230802/KnotLink/releases
+
+### **➡️ [Download the REQUIRED MineBackup Desktop Application Here](https://github.com/Leafuke/MineBackup/releases)**
 
 ---
 
-## 这是什么？
+## What is This?
 
-这个轻量级的 Forge 模组是连接功能强大的 **MineBackup 桌面应用**与 **Minecraft 游戏本身**的桥梁。它让你可以在不离开游戏的情况下，享受到 MineBackup 带来的所有便利。
+This lightweight Forge mod serves as a bridge between the powerful **MineBackup desktop application** and **Minecraft itself**. It allows you to enjoy all the conveniences of MineBackup without ever leaving your game.
 
-### ✨ 本模组为您提供：
+### ✨ This Mod Provides:
 
-* **丰富的游戏内指令**: 使用 `/minebackup` 系列指令，直接在聊天框里管理你的存档备份。你也可以使用快捷键 `Alt + Ctrl + S` 来备份你的存档！
-* **实时的备份通知**: 无论是备份开始、成功还是失败，你都会在游戏聊天框里收到来自主程序的实时消息。
-* **无缝的热备份支持**: 当主程序需要进行“热备份”（即在游戏运行时备份）时，本模组会自动在后台执行一次安全的、完整的世界保存（等同于 `/save-all`），确保你备份的永远是最新的进度。
+* **Rich In-Game Commands**: Use the `/minebackup` command series to manage your world saves directly from the chat. You can also use the hotkey `Alt + Ctrl + S` to back up your world!
+* **Real-Time Backup Notifications**: Receive real-time messages from the main application in your game chat—whether a backup starts, succeeds, or fails.
+* **Seamless Live Backup Support**: When the main application needs to perform a "live backup" (i.e., while the game is running), this mod automatically triggers a safe, complete world save (equivalent to `/save-all`) in the background, ensuring your backup always captures the latest progress.
 
-## 🚀 安装指南
+## 🚀 Installation Guide
 
-1.  **下载主程序**: 确保你已经从上方的链接下载了 `MineBackup.exe` 主程序，并且它可以在你的电脑上正常运行。
-2.  **下载本模组**: 从 **[Releases](https://github.com/Leafuke/MineBackup/releases)** 或其他模组下载页面找到与主程序版本匹配的 `minebackup-x.x.x.jar` 文件。
-3.  **安装模组**: 将下载的 `.jar` 文件放入你的 Minecraft 客户端的 `mods` 文件夹中。
-4.  **同时运行**: 启动你的 Minecraft 游戏或服务器。为了让模组正常工作，请务必**在玩游戏的同时，让 `MineBackup.exe` 主程序在后台运行**。
+1.  **Download the Main Application**: Ensure you have downloaded the `MineBackup.exe` desktop application from the link above and that it runs correctly on your system.
+2.  **Download This Mod**: Get the version-matched `minebackup-x.x.x.jar` file from the **[Releases](https://github.com/Leafuke/MineBackup/releases)** page or other mod distribution platforms.
+3.  **Install the Mod**: Place the downloaded `.jar` file into your Minecraft client's `mods` folder.
+4.  **Run Simultaneously**: Launch your Minecraft game or server. For the mod to function, you **must have the `MineBackup.exe` desktop application running in the background while playing**.
 
-## 📖 指令参考
+## 📖 Command Reference
 
-所有指令都需要管理员（OP）权限。
+All commands require operator (OP) permissions.
 
-| 指令 | 参数 | 描述 |
+| Command | Parameters | Description |
 | :--- | :--- | :--- |
-| **/minebackup save** | (无) | 在游戏内手动执行一次完整的世界保存，效果等同于 `/save-all`。 |
-| **/minebackup list_configs** | (无) | 列出你在 MineBackup 主程序中设置的所有配置方案及其ID。 |
-| **/minebackup list_worlds** | `<config_id>` | 列出指定配置下的所有世界及其索引号（index）。 |
-| **/minebackup list_backups** | `<config_id> <world_index>` | 列出指定世界的所有可用备份文件。 |
-| **/minebackup backup** | `<config_id> <world_index> [注释]` | 命令主程序为指定世界创建一次备份。可以附上一段可选的注释。 |
-| **/minebackup restore** | `<config_id> <world_index> <文件名>` | 命令主程序用指定的备份文件来还原世界。**这是一个危险操作，会覆盖你当前的世界！** |
-| **/minebackup auto** | `<config_id> <world_index> <internal_time>` | 请求 MineBackup 执行自动备份任务，间隔 internal_time 分钟进行自动备份 |
-| **/minebackup stop** | `<config_id> <world_index>` | 请求 MineBackup 停止自动备份任务 |
-| **/minebackup quicksave** | (无) | 为当前世界执行备份 |
+| **/minebackup save** | (none) | Manually performs a full world save in-game, equivalent to `/save-all`. |
+| **/minebackup list_configs** | (none) | Lists all your configured backup profiles and their IDs from the MineBackup desktop application. |
+| **/minebackup list_worlds** | `<config_id>` | Lists all worlds under the specified configuration profile along with their indices. |
+| **/minebackup list_backups** | `<config_id> <world_index>` | Lists all available backup files for the specified world. |
+| **/minebackup backup** | `<config_id> <world_index> [comment]` | Instructs the main application to create a backup for the specified world. An optional comment can be added. |
+| **/minebackup restore** | `<config_id> <world_index> <filename>` | Instructs the main application to restore the world using the specified backup file. **This is a dangerous operation that will overwrite your current world!** |
+| **/minebackup auto** | `<config_id> <world_index> <internal_time>` | Requests MineBackup to start an automatic backup task, backing up every `internal_time` minutes. |
+| **/minebackup stop** | `<config_id> <world_index>` | Requests MineBackup to stop the automatic backup task. |
+| **/minebackup quicksave** | (none) | Performs a backup for the current world. |
 
-### **💡 使用示例**
+### **💡 Usage Example**
 
-假设你想为你服务器的主世界创建一个备份：
+Let's say you want to create a backup for your server's main world:
 
-1.  **第一步：找到配置和世界**
-    * 输入 `/minebackup list_configs` 来查看你的配置方案。
-        > 聊天框返回: `可用配置列表: - ID: 1, 名称: 生存服务器`
-    * 输入 `/minebackup list_worlds 1` 来查看 "生存服务器" 配置下的世界。
-        > 聊天框返回: `配置 1 的世界列表: - 索引: 0, 名称: world`
+1.  **Step 1: Find the Configuration and World**
+    * Type `/minebackup list_configs` to see your configuration profiles.
+        > Chat returns: `Available Configurations: - ID: 1, Name: Survival Server`
+    * Type `/minebackup list_worlds 1` to see the worlds under the "Survival Server" profile.
+        > Chat returns: `Worlds for Config 1: - Index: 0, Name: world`
 
-2.  **第二步：执行备份**
-    * 现在你知道了配置ID是 `1`，世界索引是 `0`。
-    * 输入 `/minebackup backup 1 0 准备打末影龙！`
-        > 聊天框返回: `[MineBackup] 世界 'world' 的备份任务已开始...`
-        > (稍等片刻)
-        > `[MineBackup] 备份成功! 世界 'world' 已保存为 [Full][2025-08-11_12-33-00]world [准备打末影龙！].7z`
+2.  **Step 2: Perform the Backup**
+    * Now you know the config ID is `1` and the world index is `0`.
+    * Type `/minebackup backup 1 0 Preparing for Ender Dragon!`
+        > Chat returns: `[MineBackup] Backup task for world 'world' started...`
+        > (After a moment)
+        > `[MineBackup] Backup successful! World 'world' saved as [Full][2025-08-11_12-33-00]world [Preparing for Ender Dragon!].7z`
 
-3.  **(如果需要) 第三步：执行还原**
-    * 先用 `/minebackup list_backups 1 0` 查看所有备份文件。
-    * 找到你想还原的文件名，例如 `[Full][2025-08-11_12-33-00]world [准备打末影龙！].7z`。
-    * 执行 `/minebackup restore 1 0 "[Full][2025-08-11_12-33-00]world [准备打末影龙！].7z"`。（**提示**：如果文件名包含空格，建议用英文双引号 `""` 将其括起来）
+3.  **(If Needed) Step 3: Perform a Restore**
+    * First, use `/minebackup list_backups 1 0` to list all backup files.
+    * Find the filename you want to restore, e.g., `[Full][2025-08-11_12-33-00]world [Preparing for Ender Dragon!].7z`.
+    * Execute `/minebackup restore 1 0 "[Full][2025-08-11_12-33-00]world [Preparing for Ender Dragon!].7z"`. (**Tip**: If the filename contains spaces, enclose it in double quotes `""`).
 
-## ❓ 常见问题
+## ❓ Frequently Asked Questions
 
-* **问题：我输入指令后，聊天框提示“指令失败”、“无响应”或类似的错误。**
-    * **答案：** 请检查并确保 `MineBackup.exe` 主程序正在你的电脑后台运行。本模组的所有功能都依赖于和主程序的网络通信。
+* **Q: When I use a command, the chat says "Command failed", "No response", or a similar error.**
+    * **A:** Please check and ensure the `MineBackup.exe` desktop application is running in the background on your computer. All features of this mod rely on network communication with the main application.
 
-* **问题：这个模组可以单独使用吗？**
-    * **答案：** 不可以。它是一个“桥梁”，没有主程序，它什么也做不了。
+* **Q: Can this mod be used by itself?**
+    * **A:** No. It is a "bridge" and cannot do anything without the main application.
 
-## 📄 许可证
+## 📄 License
 
-本项目采用 [MIT License](https://github.com/Leafuke/MineBackup/blob/main/LICENSE) 开源。详情请访问主项目仓库。
+This project is licensed under the [MIT License](https://github.com/Leafuke/MineBackup/blob/main/LICENSE). For details, please visit the main project repository.
