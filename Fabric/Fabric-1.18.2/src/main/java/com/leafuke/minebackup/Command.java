@@ -12,6 +12,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.TextComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.network.chat.TranslatableComponent;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -32,11 +33,11 @@ public class Command {
                         .executes(ctx -> {
                             CommandSourceStack source = ctx.getSource();
                             MinecraftServer server = source.getServer();
-                            source.sendSuccess(new TextComponent("§6[MineBackup] §e正在执行本地世界保存..."), true);
+                            source.sendSuccess(new TranslatableComponent("minebackup.message.save.start"), true);
                             for (ServerLevel level : server.getAllLevels()) {
                                 level.save(null, true, false);
                             }
-                            source.sendSuccess(new TextComponent("§a[MineBackup] §e本地世界保存成功。"), true);
+                            source.sendSuccess(new TranslatableComponent("minebackup.message.save.success"), true);
                             return 1;
                         })
                 )
@@ -44,7 +45,7 @@ public class Command {
                 // 2. 查询配置列表
                 .then(Commands.literal("list_configs")
                         .executes(ctx -> {
-                            ctx.getSource().sendSuccess(new TextComponent("§e正在从 MineBackup 获取配置列表..."), false);
+                            ctx.getSource().sendSuccess(new TranslatableComponent("minebackup.message.list_configs.start"), false);
                             queryBackend("LIST_CONFIGS", response -> handleListConfigsResponse(ctx.getSource(), response));
                             return 1;
                         })
@@ -55,7 +56,7 @@ public class Command {
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .executes(ctx -> {
                                     int configId = IntegerArgumentType.getInteger(ctx, "config_id");
-                                    ctx.getSource().sendSuccess(new TextComponent(String.format("§e正在获取配置 %d 的世界列表...", configId)), false);
+                                    ctx.getSource().sendSuccess(new TranslatableComponent("minebackup.message.list_worlds.start", String.valueOf(configId)), false);
                                     queryBackend(
                                             String.format("LIST_WORLDS %d", configId),
                                             response -> handleListWorldsResponse(ctx.getSource(), response, configId)
@@ -72,7 +73,7 @@ public class Command {
                                         .executes(ctx -> {
                                             int configId = IntegerArgumentType.getInteger(ctx, "config_id");
                                             int worldIndex = IntegerArgumentType.getInteger(ctx, "world_index");
-                                            ctx.getSource().sendSuccess(new TextComponent(String.format("§e正在获取配置 %d, 世界 %d 的备份列表...", configId, worldIndex)), false);
+                                            ctx.getSource().sendSuccess(new TranslatableComponent("minebackup.message.list_backups.start", String.valueOf(configId), String.valueOf(worldIndex)), false);
                                             queryBackend(
                                                     String.format("LIST_BACKUPS %d %d", configId, worldIndex),
                                                     response -> handleListBackupsResponse(ctx.getSource(), response, configId, worldIndex)
@@ -126,11 +127,11 @@ public class Command {
                         .executes(ctx -> {
                             CommandSourceStack source = ctx.getSource();
                             MinecraftServer server = source.getServer();
-                            source.sendSuccess(new TextComponent("§6[MineBackup] §e正在执行本地世界保存..."), true);
+                            source.sendSuccess(new TranslatableComponent("minebackup.message.save.start"), true);
                             for (ServerLevel level : server.getAllLevels()) {
                                 level.save(null, true, false);
                             }
-                            source.sendSuccess(new TextComponent("§a[MineBackup] §e本地世界保存成功。"), true);
+                            source.sendSuccess(new TranslatableComponent("minebackup.message.save.success"), true);
                             // 修正：在1.18.2中，一个executes不能链式调用另一个，需要分开或者合并逻辑
                             executeRemoteCommand(source, "BACKUP_CURRENT");
                             return 1;
@@ -139,11 +140,11 @@ public class Command {
                                 .executes(ctx -> {
                                     CommandSourceStack source = ctx.getSource();
                                     MinecraftServer server = source.getServer();
-                                    source.sendSuccess(new TextComponent("§6[MineBackup] §e正在执行本地世界保存..."), true);
+                                    source.sendSuccess(new TranslatableComponent("minebackup.message.save.start"), true);
                                     for (ServerLevel level : server.getAllLevels()) {
                                         level.save(null, true, false);
                                     }
-                                    source.sendSuccess(new TextComponent("§a[MineBackup] §e本地世界保存成功。"), true);
+                                    source.sendSuccess(new TranslatableComponent("minebackup.message.save.success"), true);
                                     executeRemoteCommand(source, String.format("BACKUP_CURRENT %s", StringArgumentType.getString(ctx, "comment")));
                                     return 1;
                                 })
@@ -186,14 +187,14 @@ public class Command {
 
     // 统一处理需要通用响应的远程命令
     private static int executeRemoteCommand(CommandSourceStack source, String command) {
-        source.sendSuccess(new TextComponent("§e向 MineBackup 发送指令: §f" + command), false);
+        // 使用带参数的翻译键
+        source.sendSuccess(new TranslatableComponent("minebackup.message.command.sent", command), false);
         queryBackend(command, response -> {
             source.getServer().execute(() -> {
                 if (response != null && response.startsWith("ERROR:")) {
-                    source.sendFailure(new TextComponent("§c指令失败: " + response.substring(6)));
+                    source.sendFailure(new TranslatableComponent("minebackup.message.command.fail", response.substring(6)));
                 } else {
-                    // 成功消息由广播事件处理，这里只显示通用响应
-                    source.sendSuccess(new TextComponent("§aMineBackup 响应: §f" + response), false);
+                    source.sendSuccess(new TranslatableComponent("minebackup.message.command.response", response), false);
                 }
             });
         });
@@ -204,18 +205,21 @@ public class Command {
     private static void handleListConfigsResponse(CommandSourceStack source, String response) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(new TextComponent("§c获取配置失败: " + (response != null ? response : "无响应")));
+                String error = response != null ? response : "No response";
+                source.sendFailure(new TranslatableComponent("minebackup.message.list_configs.fail", error));
                 return;
             }
-            MutableComponent resultText = new TextComponent("§a可用配置列表:\n");
+            // MutableComponent 已被废弃，直接使用 Component 或其子类
+            // 注意：因为 entry 带有换行符，我们不需要手动添加
+            var resultText = new TranslatableComponent("minebackup.message.list_configs.success.title");
             String data = response.substring(3);
             if (data.isEmpty()) {
-                resultText.append(new TextComponent("§7(无可用配置)"));
+                resultText.append(new TranslatableComponent("minebackup.message.list_configs.empty"));
             } else {
                 for (String config : data.split(";")) {
                     String[] parts = config.split(",", 2);
                     if (parts.length == 2) {
-                        resultText.append(new TextComponent(String.format("§f - ID: §b%s§f, 名称: §d%s\n", parts[0], parts[1])));
+                        resultText.append(new TranslatableComponent("minebackup.message.list_configs.success.entry", parts[0], parts[1]));
                     }
                 }
             }
@@ -227,17 +231,17 @@ public class Command {
     private static void handleListWorldsResponse(CommandSourceStack source, String response, int configId) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(new TextComponent("§c获取世界列表失败: " + (response != null ? response : "无响应")));
+                source.sendFailure(new TranslatableComponent("minebackup.message.list_worlds.fail", response != null ? response : "No response"));
                 return;
             }
-            MutableComponent resultText = new TextComponent(String.format("§a配置 %d 的世界列表:\n", configId));
+            MutableComponent resultText = new TranslatableComponent("minebackup.message.list_worlds.success.title", String.valueOf(configId));
             String data = response.substring(3);
             if (data.isEmpty()) {
-                resultText.append(new TextComponent("§7(该配置下无世界)"));
+                resultText.append(new TranslatableComponent("minebackup.message.list_worlds.empty"));
             } else {
                 String[] worlds = data.split(";");
                 for (int i = 0; i < worlds.length; i++) {
-                    resultText.append(new TextComponent(String.format("§f - 索引: §b%d§f, 名称: §d%s\n", i, worlds[i])));
+                    resultText.append(new TranslatableComponent("minebackup.message.list_worlds.success.entry", String.valueOf(i), worlds[i]));
                 }
             }
             source.sendSuccess(resultText, false);
@@ -248,17 +252,17 @@ public class Command {
     private static void handleListBackupsResponse(CommandSourceStack source, String response, int configId, int worldIndex) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(new TextComponent("§c获取备份列表失败: " + (response != null ? response : "无响应")));
+                source.sendFailure(new TranslatableComponent("minebackup.message.list_backups.fail", response != null ? response : "No response"));
                 return;
             }
-            MutableComponent resultText = new TextComponent(String.format("§a配置 %d, 世界 %d 的备份列表:\n", configId, worldIndex));
+            MutableComponent resultText = new TranslatableComponent("minebackup.message.list_backups.success.title", String.valueOf(configId), String.valueOf(worldIndex));
             String data = response.substring(3);
             if (data.isEmpty()) {
-                resultText.append(new TextComponent("§7(该世界暂无备份)"));
+                resultText.append(new TranslatableComponent("minebackup.message.list_backups.empty"));
             } else {
                 for (String file : data.split(";")) {
                     if (!file.isEmpty()) {
-                        resultText.append(new TextComponent("§f - §b" + file + "\n"));
+                        resultText.append(new TranslatableComponent("minebackup.message.list_backups.success.entry", file));
                     }
                 }
             }
@@ -286,3 +290,4 @@ public class Command {
                 });
     }
 }
+

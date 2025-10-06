@@ -31,11 +31,11 @@ public class Command {
                         .executes(ctx -> {
                             CommandSourceStack source = ctx.getSource();
                             MinecraftServer server = source.getServer();
-                            source.sendSuccess(() -> Component.literal("§6[MineBackup] §e正在执行本地世界保存..."), true);
+                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
                             for (ServerLevel level : server.getAllLevels()) {
                                 level.save(null, true, false);
                             }
-                            source.sendSuccess(() -> Component.literal("§a[MineBackup] §e本地世界保存成功。"), true);
+                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
                             return 1;
                         })
                 )
@@ -43,7 +43,7 @@ public class Command {
                 // 2. 查询配置列表
                 .then(Commands.literal("list_configs")
                         .executes(ctx -> {
-                            ctx.getSource().sendSuccess(() -> Component.literal("§e正在从 MineBackup 获取配置列表..."), false);
+                            ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_configs.start"), false);
                             queryBackend("LIST_CONFIGS", response -> handleListConfigsResponse(ctx.getSource(), response));
                             return 1;
                         })
@@ -54,7 +54,7 @@ public class Command {
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .executes(ctx -> {
                                     int configId = IntegerArgumentType.getInteger(ctx, "config_id");
-                                    ctx.getSource().sendSuccess(() -> Component.literal(String.format("§e正在获取配置 %d 的世界列表...", configId)), false);
+                                    ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_worlds.start", configId), false);
                                     queryBackend(
                                             String.format("LIST_WORLDS %d", configId),
                                             response -> handleListWorldsResponse(ctx.getSource(), response, configId)
@@ -71,7 +71,7 @@ public class Command {
                                         .executes(ctx -> {
                                             int configId = IntegerArgumentType.getInteger(ctx, "config_id");
                                             int worldIndex = IntegerArgumentType.getInteger(ctx, "world_index");
-                                            ctx.getSource().sendSuccess(() -> Component.literal(String.format("§e正在获取配置 %d, 世界 %d 的备份列表...", configId, worldIndex)), false);
+                                            ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_backups.start", configId, worldIndex), false);
                                             queryBackend(
                                                     String.format("LIST_BACKUPS %d %d", configId, worldIndex),
                                                     response -> handleListBackupsResponse(ctx.getSource(), response, configId, worldIndex)
@@ -125,11 +125,11 @@ public class Command {
                             .executes(ctx -> {
                                 CommandSourceStack source = ctx.getSource();
                                 MinecraftServer server = source.getServer();
-                                source.sendSuccess(() -> Component.literal("§6[MineBackup] §e正在执行本地世界保存..."), true);
+                                source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
                                 for (ServerLevel level : server.getAllLevels()) {
                                     level.save(null, true, false);
                                 }
-                                source.sendSuccess(() -> Component.literal("§a[MineBackup] §e本地世界保存成功。"), true);
+                                source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
                                 return 1;
                             })
                             .executes(ctx ->executeRemoteCommand(ctx.getSource(), // 不带评论
@@ -138,11 +138,11 @@ public class Command {
                                     .executes(ctx -> {
                                         CommandSourceStack source = ctx.getSource();
                                         MinecraftServer server = source.getServer();
-                                        source.sendSuccess(() -> Component.literal("§6[MineBackup] §e正在执行本地世界保存..."), true);
+                                        source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
                                         for (ServerLevel level : server.getAllLevels()) {
                                             level.save(null, true, false);
                                         }
-                                        source.sendSuccess(() -> Component.literal("§a[MineBackup] §e本地世界保存成功。"), true);
+                                        source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
                                         return 1;
                                     })
                                     .executes(ctx -> executeRemoteCommand(ctx.getSource(), // 带评论
@@ -187,14 +187,14 @@ public class Command {
 
     // 统一处理需要通用响应的远程命令
     private static int executeRemoteCommand(CommandSourceStack source, String command) {
-        source.sendSuccess(() -> Component.literal("§e向 MineBackup 发送指令: §f" + command), false);
+        source.sendSuccess(() -> Component.translatable("minebackup.message.command.sent", command), false);
         queryBackend(command, response -> {
             source.getServer().execute(() -> {
                 if (response != null && response.startsWith("ERROR:")) {
-                    source.sendFailure(Component.literal("§c指令失败: " + response.substring(6)));
+                    source.sendFailure(Component.translatable("minebackup.message.command.fail", response.substring(6)));
                 } else {
                     // 成功消息由广播事件处理，这里只显示通用响应
-                    source.sendSuccess(() -> Component.literal("§aMineBackup 响应: §f" + response), false);
+                    source.sendSuccess(() -> Component.translatable("minebackup.message.command.response", response), false);
                 }
             });
         });
@@ -205,18 +205,18 @@ public class Command {
     private static void handleListConfigsResponse(CommandSourceStack source, String response) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(Component.literal("§c获取配置失败: " + (response != null ? response : "无响应")));
+                source.sendFailure(Component.translatable("minebackup.message.list_configs.fail", response != null ? response : "无响应"));
                 return;
             }
-            MutableComponent resultText = Component.literal("§a可用配置列表:\n");
+            MutableComponent resultText = Component.translatable("minebackup.message.list_configs.success.title");
             String data = response.substring(3);
             if (data.isEmpty()) {
-                resultText.append(Component.literal("§7(无可用配置)"));
+                resultText.append(Component.translatable("minebackup.message.list_configs.empty"));
             } else {
                 for (String config : data.split(";")) {
                     String[] parts = config.split(",", 2);
                     if (parts.length == 2) {
-                        resultText.append(Component.literal(String.format("§f - ID: §b%s§f, 名称: §d%s\n", parts[0], parts[1])));
+                        resultText.append(Component.translatable("minebackup.message.list_configs.success.entry", parts[0], parts[1]));
                     }
                 }
             }
@@ -228,17 +228,17 @@ public class Command {
     private static void handleListWorldsResponse(CommandSourceStack source, String response, int configId) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(Component.literal("§c获取世界列表失败: " + (response != null ? response : "无响应")));
+                source.sendFailure(Component.translatable("minebackup.message.list_worlds.fail", response != null ? response : "无响应"));
                 return;
             }
-            MutableComponent resultText = Component.literal(String.format("§a配置 %d 的世界列表:\n", configId));
+            MutableComponent resultText = Component.translatable("minebackup.message.list_worlds.success.title", configId);
             String data = response.substring(3);
             if (data.isEmpty()) {
-                resultText.append(Component.literal("§7(该配置下无世界)"));
+                resultText.append(Component.translatable("minebackup.message.list_worlds.empty"));
             } else {
                 String[] worlds = data.split(";");
                 for (int i = 0; i < worlds.length; i++) {
-                    resultText.append(Component.literal(String.format("§f - 索引: §b%d§f, 名称: §d%s\n", i, worlds[i])));
+                    resultText.append(Component.translatable("minebackup.message.list_worlds.success.entry", i, worlds[i]));
                 }
             }
             source.sendSuccess(() -> resultText, false);
@@ -249,17 +249,17 @@ public class Command {
     private static void handleListBackupsResponse(CommandSourceStack source, String response, int configId, int worldIndex) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(Component.literal("§c获取备份列表失败: " + (response != null ? response : "无响应")));
+                source.sendFailure(Component.translatable("minebackup.message.list_backups.fail", response != null ? response : "无响应"));
                 return;
             }
-            MutableComponent resultText = Component.literal(String.format("§a配置 %d, 世界 %d 的备份列表:\n", configId, worldIndex));
+            MutableComponent resultText = Component.translatable("minebackup.message.list_backups.success.title", configId, worldIndex);
             String data = response.substring(3);
             if (data.isEmpty()) {
-                resultText.append(Component.literal("§7(该世界暂无备份)"));
+                resultText.append(Component.translatable("minebackup.message.list_backups.empty"));
             } else {
                 for (String file : data.split(";")) {
                     if (!file.isEmpty()) {
-                        resultText.append(Component.literal("§f - §b" + file + "\n"));
+                        resultText.append(Component.translatable("minebackup.message.list_backups.success.entry", file));
                     }
                 }
             }
@@ -287,3 +287,4 @@ public class Command {
                 });
     }
 }
+

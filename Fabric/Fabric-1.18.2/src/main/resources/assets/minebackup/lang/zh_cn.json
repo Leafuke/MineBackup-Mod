@@ -1,0 +1,39 @@
+{
+  "minebackup.message.save.start": "§6[MineBackup] §e正在执行本地世界保存...",
+  "minebackup.message.save.success": "§a[MineBackup] §e本地世界保存成功。",
+  "minebackup.message.remote_save.start": "§6[MineBackup] §e正在执行远程保存指令...",
+  "minebackup.message.remote_save.success": "§a[MineBackup] §e远程保存完成！",
+  "minebackup.message.remote_save.fail": "§c[MineBackup] §e远程保存失败！",
+
+  "minebackup.message.list_configs.start": "§e正在从 MineBackup 获取配置列表...",
+  "minebackup.message.list_configs.success.title": "§a可用配置列表:\n",
+  "minebackup.message.list_configs.success.entry": "§f - ID: §b%s§f, 名称: §d%s\n",
+  "minebackup.message.list_configs.empty": "§7(无可用配置)",
+  "minebackup.message.list_configs.fail": "§c获取配置失败: %s",
+
+  "minebackup.message.list_worlds.start": "§e正在获取配置 %s 的世界列表...",
+  "minebackup.message.list_worlds.success.title": "§a配置 %s 的世界列表:\n",
+  "minebackup.message.list_worlds.success.entry": "§f - 索引: §b%s§f, 名称: §d%s\n",
+  "minebackup.message.list_worlds.empty": "§7(该配置下无世界)",
+  "minebackup.message.list_worlds.fail": "§c获取世界列表失败: %s",
+
+  "minebackup.message.list_backups.start": "§e正在获取配置 %s, 世界 %s 的备份列表...",
+  "minebackup.message.list_backups.success.title": "§a配置 %s, 世界 %s 的备份列表:\n",
+  "minebackup.message.list_backups.success.entry": "§f - §b%s\n",
+  "minebackup.message.list_backups.empty": "§7(该世界暂无备份)",
+  "minebackup.message.list_backups.fail": "§c获取备份列表失败: %s",
+
+  "minebackup.message.command.sent": "§e向 MineBackup 发送指令: §f%s",
+  "minebackup.message.command.response": "§aMineBackup 响应: §f%s",
+  "minebackup.message.command.fail": "§c指令失败: %s",
+
+  "minebackup.broadcast.backup.started": "§6[MineBackup] §e世界 '%s' 的备份任务已开始...",
+  "minebackup.broadcast.restore.started": "§6[MineBackup] §e世界 '%s' 的还原任务已开始...",
+  "minebackup.broadcast.backup.success": "§a[MineBackup] §2备份成功! §e世界 '%s' §a已保存为 §f%s",
+  "minebackup.broadcast.backup.failed": "§c[MineBackup] §4备份失败! §e世界 '%s'. §c原因: %s",
+  "minebackup.broadcast.hot_backup.request": "§6[MineBackup] §e收到热备份请求，正在为世界 '%s' 保存最新数据...",
+  "minebackup.broadcast.hot_backup.warn": "§c[MineBackup] §4警告: 世界 '%s' 的部分数据保存失败，热备份可能不完整！",
+  "minebackup.broadcast.hot_backup.complete": "§a[MineBackup] §e世界保存完毕，备份程序已开始工作。",
+  "minebackup.broadcast.session.end": "§7[MineBackup] 游戏会话结束: %s. 后台可能已触发退出时备份。",
+  "minebackup.broadcast.auto_backup.started": "§6[MineBackup] §e世界 '%s' 的自动备份任务已开始..."
+}

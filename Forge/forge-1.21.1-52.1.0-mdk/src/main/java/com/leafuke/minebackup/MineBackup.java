@@ -60,12 +60,15 @@ public class MineBackup
         if ("minebackup save".equals(payload)) {
             serverInstance.execute(() -> {
                 LOGGER.info("Received 'minebackup save' command, executing immediate world save.");
-                serverInstance.getPlayerList().broadcastSystemMessage(Component.literal("§6[MineBackup] §e正在执行远程保存指令..."), false);
+                serverInstance.getPlayerList().broadcastSystemMessage(
+                        Component.translatable("minebackup.message.remote_save.start"), false);
                 boolean allLevelsSaved = serverInstance.saveAllChunks(true, true, true);
                 if(allLevelsSaved) {
-                    serverInstance.getPlayerList().broadcastSystemMessage(Component.literal("§a[MineBackup] §e远程保存完成！"), false);
+                    serverInstance.getPlayerList().broadcastSystemMessage(
+                            Component.translatable("minebackup.message.remote_save.success"), false);
                 } else {
-                    serverInstance.getPlayerList().broadcastSystemMessage(Component.literal("§c[MineBackup] §e远程保存失败！"), false);
+                    serverInstance.getPlayerList().broadcastSystemMessage(
+                            Component.translatable("minebackup.message.remote_save.fail"), false);
                 }
             });
             return; // 处理完毕，直接返回
@@ -81,70 +84,79 @@ public class MineBackup
         Component message = null;
         switch (eventType) {
             case "backup_started":
-                message = Component.literal(
-                        String.format("§6[MineBackup] §e世界 '%s' 的备份任务已开始...",
-                                eventData.getOrDefault("world", "未知世界"))
+                message = Component.translatable(
+                        "minebackup.broadcast.backup.started",
+                        eventData.getOrDefault("world", "Unknown World")
                 );
                 break;
             case "restore_started":
-                message = Component.literal(
-                        String.format("§6[MineBackup] §e世界 '%s' 的还原任务已开始...",
-                                eventData.getOrDefault("world", "未知世界"))
+                message = Component.translatable(
+                        "minebackup.broadcast.restore.started",
+                        eventData.getOrDefault("world", "Unknown World")
                 );
                 break;
 
             // (优化) 任务成功/失败的响应
             case "backup_success":
-                message = Component.literal(
-                        String.format("§a[MineBackup] §2备份成功! §e世界 '%s' §a已保存为 §f%s",
-                                eventData.getOrDefault("world", "未知世界"),
-                                eventData.getOrDefault("file", "未知文件"))
+                message = Component.translatable(
+                        "minebackup.broadcast.backup.success",
+                        eventData.getOrDefault("world", "Unknown World"),
+                        eventData.getOrDefault("file", "Unknown File")
                 );
                 break;
             case "backup_failed":
-                message = Component.literal(
-                        String.format("§c[MineBackup] §4备份失败! §e世界 '%s'. §c原因: %s",
-                                eventData.getOrDefault("world", "未知世界"),
-                                eventData.getOrDefault("error", "未知错误"))
+                message = Component.translatable(
+                        "minebackup.broadcast.backup.failed",
+                        eventData.getOrDefault("world", "Unknown World"),
+                        eventData.getOrDefault("error", "Unknown Error")
                 );
                 break;
             case "pre_hot_backup":
                 // 收到热备份信号，立即执行世界保存操作
                 serverInstance.execute(() -> {
                     LOGGER.info("Executing immediate save for pre_hot_backup event.");
-                    String worldName = eventData.getOrDefault("world", "未知世界");
+                    String worldName = eventData.getOrDefault("world", "Unknown World");
 
                     boolean allSaved = serverInstance.saveAllChunks(true, true, true);
 
                     // 广播一个保存中的提示
-                    serverInstance.getPlayerList().broadcastSystemMessage(Component.literal(String.format("§6[MineBackup] §e收到热备份请求，正在为世界 '%s' 保存最新数据...", worldName)), false);
+                    serverInstance.getPlayerList().broadcastSystemMessage(
+                            Component.translatable("minebackup.broadcast.hot_backup.request", worldName), false);
                     if (!allSaved) {
                         LOGGER.warn("One or more levels failed to save during pre_hot_backup for world: {}", worldName);
-                        serverInstance.getPlayerList().broadcastSystemMessage(Component.literal(String.format("§c[MineBackup] §4警告: 世界 '%s' 的部分数据保存失败，热备份可能不完整！", worldName)), false);
+                        serverInstance.getPlayerList().broadcastSystemMessage(
+                                Component.translatable("minebackup.broadcast.hot_backup.warn", worldName), false);
                     }
                     for (ServerLevel level : serverInstance.getAllLevels()) {
                         level.save(null, true, false);
                     }
 
                     LOGGER.info("World saved successfully for hot backup.");
-                    serverInstance.getPlayerList().broadcastSystemMessage(Component.literal("§a[MineBackup] §e世界保存完毕，备份程序已开始工作。"), false);
+                    serverInstance.getPlayerList().broadcastSystemMessage(
+                            Component.translatable("minebackup.broadcast.hot_backup.complete"), false);
                 });
                 break; // 保存逻辑已处理完毕，跳出 switch
             case "game_session_start":
                 // 仅在服务器日志中记录，不打扰玩家
                 LOGGER.info("MineBackup detected game session start for world: {}", eventData.getOrDefault("world", "未知"));
+                // 可选：广播会话开始
+                message = Component.translatable(
+                        "minebackup.broadcast.session.start",
+                        eventData.getOrDefault("world", "Unknown World")
+                );
                 break;
             case "game_session_end":
                 LOGGER.info("MineBackup detected game session end for world: {}", eventData.getOrDefault("world", "未知"));
                 // 可以选择在这里也通知玩家
-                message = Component.literal(
-                        String.format("§7[MineBackup] 游戏会话结束: %s. 后台可能已触发退出时备份。", eventData.getOrDefault("world", "未知世界"))
+                message = Component.translatable(
+                        "minebackup.broadcast.session.end",
+                        eventData.getOrDefault("world", "Unknown World")
                 );
                 break;
             case "auto_backup_started":
-                message = Component.literal(
-                        String.format("§6[MineBackup] §e世界 '%s' 的自动备份任务已开始...",
-                                eventData.getOrDefault("world", "未知世界"))
+                message = Component.translatable(
+                        "minebackup.broadcast.auto_backup.started",
+                        eventData.getOrDefault("world", "Unknown World")
                 );
                 break;
         }
