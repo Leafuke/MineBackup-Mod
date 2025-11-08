@@ -48,6 +48,7 @@ All commands require operator (OP) permissions.
 | **/minebackup auto** | `<config_id> <world_index> <internal_time>` | Requests MineBackup to start an automatic backup task, backing up every `internal_time` minutes. |
 | **/minebackup stop** | `<config_id> <world_index>` | Requests MineBackup to stop the automatic backup task. |
 | **/minebackup quicksave** | (none) | Performs a backup for the current world. |
+| **/minebackup snap** | `<config_id> <world_index> <filename>` | Creating a snapshot for WorldEdit |
 
 ### **💡 Usage Example**
 
