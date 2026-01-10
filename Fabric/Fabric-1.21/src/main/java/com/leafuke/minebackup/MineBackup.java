@@ -9,6 +9,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.text.Text;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.WorldSavePath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,17 +65,24 @@ public class MineBackup implements ModInitializer {
                 serverInstance = server;
                 knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
             }
+
+            Config.load();
+            if (Config.hasAutoBackup()) {
+                String cmd = String.format("AUTO_BACKUP %d %d %d", Config.getConfigId(), Config.getWorldIndex(), Config.getInternalTime());
+                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, cmd);
+                LOGGER.info("Sent auto backup request from config: {}", cmd);
+            }
         });
 
-//         Fabric's equivalent of ServerStoppingEvent
-        // 为了接收还原成功信号，服务器停止时不关闭订阅。
-//        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
-//            LOGGER.info("MineBackup Mod: Server is stopping, shutting down KnotLink Subscriber...");
-//            if (knotLinkSubscriber != null) {
-//                knotLinkSubscriber.stop();
-//            }
-//            serverInstance = null;
-//        });
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            if (server.isDedicated()) {
+                if (knotLinkSubscriber != null) {
+                    knotLinkSubscriber.stop();
+                    knotLinkSubscriber = null;
+                    LOGGER.info("MineBackup Mod: Server stopping, stopped KnotLink Subscriber.");
+                }
+            }
+        });
     }
 
 
@@ -139,7 +147,7 @@ public class MineBackup implements ModInitializer {
                     LOGGER.info("Single-player instance detected. Saving and disconnecting player.");
 
                     // 1. 保存当前世界ID到客户端暂存区
-                    String levelId = serverInstance.getSaveProperties().getLevelName();
+                    String levelId = serverInstance.getSavePath(WorldSavePath.ROOT).getFileName().toString();
                     MineBackupClient.worldToRejoin = levelId;
 
                     // 2. 保存游戏

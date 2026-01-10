@@ -6,6 +6,7 @@ import com.leafuke.minebackup.knotlink.SignalSender;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -13,6 +14,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,6 +66,24 @@ public class MineBackup {
             knotLinkSubscriber = new SignalSubscriber(BROADCAST_APP_ID, BROADCAST_SIGNAL_ID);
             knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
             new Thread(knotLinkSubscriber::start).start();
+        }
+
+        Config.load();
+        if (Config.hasAutoBackup()) {
+            String cmd = String.format("AUTO_BACKUP %d %d %d", Config.getConfigId(), Config.getWorldIndex(), Config.getInternalTime());
+            OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, cmd);
+            LOGGER.info("Sent auto backup request from config: {}", cmd);
+        }
+    }
+
+    @SubscribeEvent
+    public void onServerStopping(ServerStoppingEvent event) {
+        if (event.getServer().isDedicatedServer()) {
+            if (knotLinkSubscriber != null) {
+                knotLinkSubscriber.stop();
+                knotLinkSubscriber = null;
+                LOGGER.info("MineBackup Mod: Server stopping, stopped KnotLink Subscriber.");
+            }
         }
     }
 
@@ -124,7 +144,7 @@ public class MineBackup {
                     serverInstance.stopServer();
                 } else {
                     LOGGER.info("Single-player instance detected. Saving and disconnecting player.");
-                    String levelId = serverInstance.getWorldData().getLevelName();
+                    String levelId = serverInstance.getWorldPath(LevelResource.ROOT).getFileName().toString();
                     MineBackupClient.worldToRejoin = levelId;
                     serverInstance.saveAllChunks(true, false, true);
                     ServerPlayer singlePlayer = serverInstance.getPlayerList().getPlayers().get(0);
@@ -176,3 +196,4 @@ public class MineBackup {
         }
     }
 }
+

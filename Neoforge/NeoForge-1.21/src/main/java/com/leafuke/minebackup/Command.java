@@ -27,7 +27,10 @@ public class Command {
         // 内部的所有命令定义 (dispatcher.register(...)) 都是基于 Brigadier 的，无需更改。
         // ... (你的所有命令定义代码保持不变)
         dispatcher.register(Commands.literal("minebackup")
-                .requires(src -> src.hasPermission(2)) // 需要OP权限
+                .requires(src -> {
+                    if (!src.getServer().isDedicatedServer()) return true;
+                    return src.hasPermission(2);
+                }) // 需要OP权限
 
                 // 1. 本地保存指令
                 .then(Commands.literal("save")
@@ -159,11 +162,18 @@ public class Command {
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
                                         .then(Commands.argument("internal_time", IntegerArgumentType.integer())
-                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
+                                                .executes(ctx -> {
+                                                    Config.setAutoBackup(
+                                                            IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                            IntegerArgumentType.getInteger(ctx, "world_index"),
+                                                            IntegerArgumentType.getInteger(ctx, "internal_time")
+                                                    );
+                                                    return executeRemoteCommand(ctx.getSource(),
                                                         String.format("AUTO_BACKUP %d %d %d",
                                                                 IntegerArgumentType.getInteger(ctx, "config_id"),
                                                                 IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                                IntegerArgumentType.getInteger(ctx, "internal_time"))))
+                                                                IntegerArgumentType.getInteger(ctx, "internal_time")));
+                                                })
                                         )
                                 )
                         )
@@ -173,10 +183,13 @@ public class Command {
                 .then(Commands.literal("stop")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
-                                        .executes(ctx -> executeRemoteCommand(ctx.getSource(),
+                                        .executes(ctx -> {
+                                            Config.clearAutoBackup();
+                                            return executeRemoteCommand(ctx.getSource(),
                                                 String.format("STOP_AUTO_BACKUP %d %d",
                                                         IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                        IntegerArgumentType.getInteger(ctx, "world_index"))))
+                                                        IntegerArgumentType.getInteger(ctx, "world_index")));
+                                        })
                                 )
                         )
                 )
@@ -207,8 +220,6 @@ public class Command {
                 )
         );
     }
-
-    // ----- 其余所有辅助方法都无需修改 -----
 
     private static void queryBackend(String command, java.util.function.Consumer<String> callback) {
         OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command).thenAccept(callback);

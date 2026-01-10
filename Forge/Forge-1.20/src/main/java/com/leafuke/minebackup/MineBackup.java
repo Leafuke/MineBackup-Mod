@@ -6,10 +6,12 @@ import com.leafuke.minebackup.knotlink.SignalSender;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLLoader;
@@ -60,9 +62,27 @@ public class MineBackup {
             knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
             new Thread(knotLinkSubscriber::start).start();
         }
+
+        Config.load();
+        if (Config.hasAutoBackup()) {
+            String cmd = String.format("AUTO_BACKUP %d %d %d", Config.getConfigId(), Config.getWorldIndex(), Config.getInternalTime());
+            OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, cmd);
+            LOGGER.info("Sent auto backup request from config: {}", cmd);
+        }
     }
 
-    // ----- 其余所有逻辑与 NeoForge 版本完全相同，无需修改 -----
+    @SubscribeEvent
+    public void onServerStopping(ServerStoppingEvent event) {
+        if (event.getServer().isDedicatedServer()) {
+            if (knotLinkSubscriber != null) {
+                knotLinkSubscriber.stop();
+                knotLinkSubscriber = null;
+                LOGGER.info("MineBackup Mod: Server stopping, stopped KnotLink Subscriber.");
+            }
+        }
+    }
+
+    // ----- 其余逻辑基本保持不变 -----
 
     private Map<String, String> parsePayload(String payload) {
         Map<String, String> dataMap = new HashMap<>();
@@ -119,7 +139,7 @@ public class MineBackup {
                     serverInstance.stopServer();
                 } else {
                     LOGGER.info("Single-player instance detected. Saving and disconnecting player.");
-                    String levelId = serverInstance.getWorldData().getLevelName();
+                    String levelId = serverInstance.getWorldPath(LevelResource.ROOT).getFileName().toString();
                     MineBackupClient.worldToRejoin = levelId;
                     serverInstance.saveAllChunks(true, false, true);
                     ServerPlayer singlePlayer = serverInstance.getPlayerList().getPlayers().get(0);
@@ -171,3 +191,4 @@ public class MineBackup {
         }
     }
 }
+
