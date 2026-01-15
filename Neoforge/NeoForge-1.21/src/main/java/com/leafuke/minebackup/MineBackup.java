@@ -18,6 +18,7 @@ import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -101,6 +102,43 @@ public class MineBackup {
         return dataMap;
     }
 
+    /**
+     * 尝试解析当前世界存档文件夹名，优先使用根路径文件夹名称。
+     */
+    private String resolveLevelFolder(MinecraftServer server) {
+        try {
+            Path root = server.getWorldPath(LevelResource.ROOT);
+            if (root != null && root.getFileName() != null) {
+                return root.getFileName().toString();
+            }
+        } catch (Exception ignored) { }
+        return server.getWorldData().getLevelName();
+    }
+
+    private Component getWorldDisplay(Map<String, String> eventData) {
+        String world = eventData.get("world");
+        if (world == null || world.isBlank()) {
+            return Component.translatable("minebackup.message.unknown_world");
+        }
+        return Component.literal(world);
+    }
+
+    private Component getFileDisplay(Map<String, String> eventData) {
+        String file = eventData.get("file");
+        if (file == null || file.isBlank()) {
+            return Component.translatable("minebackup.message.unknown_file");
+        }
+        return Component.literal(file);
+    }
+
+    private Component getErrorDisplay(Map<String, String> eventData) {
+        String error = eventData.get("error");
+        if (error == null || error.isBlank()) {
+            return Component.translatable("minebackup.message.unknown_error");
+        }
+        return Component.literal(error);
+    }
+
     private static void BroadcastEvent(String event) {
         SignalSender sender = new SignalSender(BROADCAST_APP_ID, BROADCAST_SIGNAL_ID);
         sender.emitt(event);
@@ -134,23 +172,62 @@ public class MineBackup {
                 serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.message.restore.preparing"), false);
 
                 if (serverInstance.isDedicatedServer()) {
-                    LOGGER.info("Dedicated server detected. Kicking all players and stopping.");
+                    LOGGER.info("Dedicated server detected. Saving, kicking players, then stopping.");
+
+                    boolean saveSuccess = serverInstance.saveAllChunks(true, true, true);
+                    if (!saveSuccess) {
+                        LOGGER.warn("World save may be incomplete before hot restore on dedicated server.");
+                    }
+
                     var playerList = serverInstance.getPlayerList().getPlayers();
                     Component kickMessage = Component.translatable("minebackup.message.restore.kick");
-                    for (var player : playerList) {
-                        player.connection.disconnect(kickMessage);
+                    for (var player : playerList.toArray(new ServerPlayer[0])) {
+                        try {
+                            player.connection.disconnect(kickMessage);
+                        } catch (Exception e) {
+                            LOGGER.warn("Failed to disconnect player {}", e.getMessage());
+                        }
                     }
-                    OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
+
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(500);
+                        } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                        }
+                        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
+                    }).start();
+
                     serverInstance.stopServer();
                 } else {
                     LOGGER.info("Single-player instance detected. Saving and disconnecting player.");
-                    String levelId = serverInstance.getWorldPath(LevelResource.ROOT).getFileName().toString();
+
+                    String levelId = resolveLevelFolder(serverInstance);
                     MineBackupClient.worldToRejoin = levelId;
-                    serverInstance.saveAllChunks(true, false, true);
-                    ServerPlayer singlePlayer = serverInstance.getPlayerList().getPlayers().get(0);
+
+                    boolean saveSuccess = serverInstance.saveAllChunks(true, true, true);
+                    if (!saveSuccess) {
+                        LOGGER.warn("World save may be incomplete before hot restore on singleplayer.");
+                    }
+
+                    var players = serverInstance.getPlayerList().getPlayers();
                     Component kickMessage = Component.translatable("minebackup.message.restore.kick");
-                    singlePlayer.connection.disconnect(kickMessage);
-                    OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
+                    for (var player : players.toArray(new ServerPlayer[0])) {
+                        try {
+                            player.connection.disconnect(kickMessage);
+                        } catch (Exception e) {
+                            LOGGER.warn("Failed to disconnect player {}", e.getMessage());
+                        }
+                    }
+
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(400);
+                        } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                        }
+                        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
+                    }).start();
                 }
             });
             return;
@@ -162,22 +239,21 @@ public class MineBackup {
             return;
         }
 
-        String levelId = serverInstance.getWorldData().getLevelName();
         final Component message = switch (eventType) {
-            case "backup_started" -> Component.translatable("minebackup.broadcast.backup.started", eventData.getOrDefault("world", "Unknown World"));
-            case "restore_started" -> Component.translatable("minebackup.broadcast.restore.started", eventData.getOrDefault("world", "Unknown World"));
-            case "backup_success" -> Component.translatable("minebackup.broadcast.backup.success", eventData.getOrDefault("world", "Unknown World"), eventData.getOrDefault("file", "未知文件"));
-            case "backup_failed" -> Component.translatable("minebackup.broadcast.backup.failed", eventData.getOrDefault("world", "Unknown World"), eventData.getOrDefault("error", "未知错误"));
-            case "game_session_end" -> Component.translatable("minebackup.broadcast.session.end", eventData.getOrDefault("world", "Unknown World"));
-            case "auto_backup_started" -> Component.translatable("minebackup.broadcast.auto_backup.started", eventData.getOrDefault("world", "Unknown World"));
-            case "we_snapshot_completed" -> Component.translatable("minebackup.broadcast.we_snapshot.completed", eventData.getOrDefault("world", "Unknown World"), eventData.getOrDefault("file", "未知文件"));
+            case "backup_started" -> Component.translatable("minebackup.broadcast.backup.started", getWorldDisplay(eventData));
+            case "restore_started" -> Component.translatable("minebackup.broadcast.restore.started", getWorldDisplay(eventData));
+            case "backup_success" -> Component.translatable("minebackup.broadcast.backup.success", getWorldDisplay(eventData), getFileDisplay(eventData));
+            case "backup_failed" -> Component.translatable("minebackup.broadcast.backup.failed", getWorldDisplay(eventData), getErrorDisplay(eventData));
+            case "game_session_end" -> Component.translatable("minebackup.broadcast.session.end", getWorldDisplay(eventData));
+            case "auto_backup_started" -> Component.translatable("minebackup.broadcast.auto_backup.started", getWorldDisplay(eventData));
+            case "we_snapshot_completed" -> Component.translatable("minebackup.broadcast.we_snapshot.completed", getWorldDisplay(eventData), getFileDisplay(eventData));
             default -> null;
         };
 
         if ("pre_hot_backup".equals(eventType)) {
             serverInstance.execute(() -> {
                 LOGGER.info("Executing immediate save for pre_hot_backup event.");
-                String worldName = levelId;
+                String worldName = serverInstance.getWorldData().getLevelName();
                 serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.request", worldName), false);
                 boolean allSaved = serverInstance.saveAllChunks(true, true, true);
                 if (!allSaved) {
@@ -188,7 +264,7 @@ public class MineBackup {
                 serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.complete"), false);
             });
         } else if ("game_session_start".equals(eventType)) {
-            LOGGER.info("MineBackup detected game session start for world: {}", levelId);
+            LOGGER.info("MineBackup detected game session start for world: {}", getWorldDisplay(eventData).getString());
         }
 
         if (message != null) {

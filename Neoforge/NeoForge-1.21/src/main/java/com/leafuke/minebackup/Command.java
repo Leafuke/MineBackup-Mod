@@ -14,6 +14,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
 public class Command {
@@ -26,7 +27,7 @@ public class Command {
 
         // 内部的所有命令定义 (dispatcher.register(...)) 都是基于 Brigadier 的，无需更改。
         // ... (你的所有命令定义代码保持不变)
-        dispatcher.register(Commands.literal("minebackup")
+        dispatcher.register(Commands.literal("mb")
                 .requires(src -> {
                     if (!src.getServer().isDedicatedServer()) return true;
                     return src.hasPermission(2);
@@ -136,10 +137,8 @@ public class Command {
                                 level.save(null, true, false);
                             }
                             source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
-                            return 1;
+                            return executeRemoteCommand(source, "BACKUP_CURRENT");
                         })
-                        .executes(ctx ->executeRemoteCommand(ctx.getSource(), // 不带评论
-                                "BACKUP_CURRENT"))
                         .then(Commands.argument("comment", StringArgumentType.greedyString())
                                 .executes(ctx -> {
                                     CommandSourceStack source = ctx.getSource();
@@ -148,12 +147,11 @@ public class Command {
                                     for (ServerLevel level : server.getAllLevels()) {
                                         level.save(null, true, false);
                                     }
-                                    source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
-                                    return 1;
-                                })
-                                .executes(ctx -> executeRemoteCommand(ctx.getSource(), // 带评论
-                                        String.format("BACKUP_CURRENT %s",
-                                                StringArgumentType.getString(ctx, "comment"))))
+                                        source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
+                                        return executeRemoteCommand(ctx.getSource(),
+                                            String.format("BACKUP_CURRENT %s",
+                                                StringArgumentType.getString(ctx, "comment")));
+                                    })
                         )
                 )
 
@@ -219,23 +217,76 @@ public class Command {
                         )
                 )
         );
+
+        // 旧命令入口：提示已迁移到 /mb
+        dispatcher.register(Commands.literal("minebackup")
+                .requires(src -> {
+                    if (!src.getServer().isDedicatedServer()) return true;
+                    return src.hasPermission(2);
+                })
+                .executes(ctx -> {
+                    ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.command.migrated"), false);
+                    return 1;
+                })
+                .then(Commands.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> {
+                            ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.command.migrated"), false);
+                            return 1;
+                        })
+                )
+        );
     }
 
     private static void queryBackend(String command, java.util.function.Consumer<String> callback) {
-        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command).thenAccept(callback);
+        CompletableFuture<String> future = OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command);
+        if (future == null) {
+            try {
+                callback.accept(null);
+            } catch (Exception ignored) {}
+            return;
+        }
+        future
+                .exceptionally(ex -> {
+                    ex.printStackTrace();
+                    return "ERROR:COMMUNICATION_FAILED";
+                })
+                .thenAccept(resp -> {
+                    try {
+                        callback.accept(resp);
+                    } catch (Exception ignored) {}
+                });
     }
 
     private static void handleGenericResponse(CommandSourceStack source, String response, String commandType) {
         source.getServer().execute(() -> {
             if (response != null && response.startsWith("ERROR:")) {
-                source.sendFailure(Component.translatable("minebackup.message.command.fail", response.substring(6)));
+                source.sendFailure(Component.translatable("minebackup.message.command.fail", localizeErrorDetail(response)));
             } else {
                 source.sendSuccess(() -> Component.translatable("minebackup.message." + commandType + ".response", response), false);
             }
         });
     }
 
+    private static Object localizeErrorDetail(String response) {
+        if (response == null) {
+            return Component.translatable("minebackup.message.no_response");
+        }
+        if (response.startsWith("ERROR:")) {
+            String error = response.substring(6);
+            return switch (error) {
+                case "COMMUNICATION_FAILED" -> Component.translatable("minebackup.message.communication_failed");
+                case "NO_RESPONSE" -> Component.translatable("minebackup.message.no_response");
+                default -> error;
+            };
+        }
+        return response;
+    }
+
     private static int executeRemoteCommand(CommandSourceStack source, String command) {
+        if (command == null || command.trim().isEmpty()) {
+            source.sendFailure(Component.translatable("minebackup.message.command.invalid"));
+            return 0;
+        }
         source.sendSuccess(() -> Component.translatable("minebackup.message.command.sent", command), false);
         String commandType = command.split(" ")[0].toLowerCase();
         queryBackend(command, response -> handleGenericResponse(source, response, commandType));
@@ -245,7 +296,8 @@ public class Command {
     private static void handleListConfigsResponse(CommandSourceStack source, String response) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(Component.translatable("minebackup.message.list_configs.fail", response != null ? response : "无响应"));
+                Object errorDetail = localizeErrorDetail(response);
+                source.sendFailure(Component.translatable("minebackup.message.list_configs.fail", errorDetail));
                 return;
             }
             MutableComponent resultText = Component.translatable("minebackup.message.list_configs.success.title");
@@ -267,7 +319,8 @@ public class Command {
     private static void handleListWorldsResponse(CommandSourceStack source, String response, int configId) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(Component.translatable("minebackup.message.list_worlds.fail", response != null ? response : "无响应"));
+                Object errorDetail = localizeErrorDetail(response);
+                source.sendFailure(Component.translatable("minebackup.message.list_worlds.fail", errorDetail));
                 return;
             }
             MutableComponent resultText = Component.translatable("minebackup.message.list_worlds.success.title", String.valueOf(configId));
@@ -287,7 +340,8 @@ public class Command {
     private static void handleListBackupsResponse(CommandSourceStack source, String response, int configId, int worldIndex) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(Component.translatable("minebackup.message.list_backups.fail", response != null ? response : "无响应"));
+                Object errorDetail = localizeErrorDetail(response);
+                source.sendFailure(Component.translatable("minebackup.message.list_backups.fail", errorDetail));
                 return;
             }
             MutableComponent resultText = Component.translatable("minebackup.message.list_backups.success.title", String.valueOf(configId), String.valueOf(worldIndex));
@@ -312,9 +366,11 @@ public class Command {
                     if (response != null && response.startsWith("OK:")) {
                         String data = response.substring(3);
                         String[] files = data.split(";");
+                        String remaining = builder.getRemaining();
+                        String remLower = remaining == null ? "" : remaining.toLowerCase(Locale.ROOT);
                         for (String file : files) {
-                            if (!file.isEmpty() && file.toLowerCase().startsWith(builder.getRemaining().toLowerCase())) {
-                                builder.suggest("'" + file + "'");
+                            if (!file.isEmpty() && file.toLowerCase(Locale.ROOT).startsWith(remLower)) {
+                                builder.suggest(file);
                             }
                         }
                     }

@@ -3,16 +3,18 @@ package com.leafuke.minebackup;
 import com.leafuke.minebackup.knotlink.OpenSocketQuerier;
 import com.leafuke.minebackup.knotlink.SignalSubscriber;
 import com.leafuke.minebackup.knotlink.SignalSender;
+import com.leafuke.minebackup.restore.HotRestoreState;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
-import net.minecraft.text.Text;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.text.Text;
 import net.minecraft.util.WorldSavePath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -98,9 +100,60 @@ public class MineBackup implements ModInitializer {
         return dataMap;
     }
 
+    private Text getWorldDisplay(Map<String, String> eventData) {
+        String world = eventData.get("world");
+        if (world == null || world.isBlank()) {
+            return Text.translatable("minebackup.message.unknown_world");
+        }
+        return Text.literal(world);
+    }
+
+    private Text getFileDisplay(Map<String, String> eventData) {
+        String file = eventData.get("file");
+        if (file == null || file.isBlank()) {
+            return Text.translatable("minebackup.message.unknown_file");
+        }
+        return Text.literal(file);
+    }
+
+    private Text getErrorDisplay(Map<String, String> eventData) {
+        String error = eventData.get("error");
+        if (error == null || error.isBlank()) {
+            return Text.translatable("minebackup.message.unknown_error");
+        }
+        return Text.literal(error);
+    }
+
+    /**
+     * 尝试解析当前世界存档文件夹名，优先使用根路径文件夹名称。
+     */
+    private String resolveLevelFolder(MinecraftServer server) {
+        try {
+            Path root = server.getSavePath(WorldSavePath.ROOT);
+            if (root != null && root.getFileName() != null) {
+                return root.getFileName().toString();
+            }
+        } catch (Exception ignored) { }
+        return server.getSaveProperties().getLevelName();
+    }
+
     private static void BroadcastEvent(String event) {
         SignalSender sender = new SignalSender(BROADCAST_APP_ID, BROADCAST_SIGNAL_ID);
         sender.emitt(event);
+    }
+
+    // Reflection-based invocation to avoid compile-time dependency on GcaCompat in environments where analysis fails
+    private static void trySaveGcaFakePlayers(MinecraftServer server) {
+        if (server == null) return;
+        try {
+            Class<?> clazz = Class.forName("com.leafuke.minebackup.compat.GcaCompat");
+            java.lang.reflect.Method m = clazz.getMethod("saveFakePlayersIfNeeded", MinecraftServer.class);
+            m.invoke(null, server);
+        } catch (ClassNotFoundException ignored) {
+            // GcaCompat not present on classpath - nothing to do
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to invoke GcaCompat.saveFakePlayersIfNeeded: {}", t.getMessage());
+        }
     }
 
     private void handleBroadcastEvent(String payload) {
@@ -130,36 +183,73 @@ public class MineBackup implements ModInitializer {
             serverInstance.execute(() -> {
                 serverInstance.getPlayerManager().broadcast(Text.translatable("minebackup.message.restore.preparing"), false);
 
-                // 区分服务器类型
+                // 标记还原状态，避免重复触发
+                HotRestoreState.isRestoring = true;
+                HotRestoreState.waitingForServerStopAck = true;
+
                 if (serverInstance.isDedicated()) {
-                    // 专用服务器逻辑：踢出所有玩家并关闭服务器
-                    LOGGER.info("Dedicated server detected. Kicking all players and stopping.");
+                    // 专用服务器逻辑：保存、踢出玩家并停止服务器
+                    LOGGER.info("Dedicated server detected. Saving, kicking players, then stopping.");
+
+                    boolean saveSuccess = serverInstance.save(true, true, true);
+                    if (!saveSuccess) {
+                        LOGGER.warn("World save may be incomplete before hot restore on dedicated server.");
+                    }
+
                     var playerList = serverInstance.getPlayerManager().getPlayerList();
                     Text kickMessage = Text.translatable("minebackup.message.restore.kick");
-                    for (ServerPlayerEntity player : playerList) {
-                        player.networkHandler.disconnect(kickMessage);
+                    for (ServerPlayerEntity player : playerList.toArray(new ServerPlayerEntity[0])) {
+                        try {
+                            player.networkHandler.disconnect(kickMessage);
+                        } catch (Exception e) {
+                            LOGGER.warn("Failed to disconnect player {}", e.getMessage());
+                        }
                     }
-                    // 通知MineBackup可以开始了
-                    OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
-                    serverInstance.stop(false); // 关闭服务器
+
+                    // 通知 MineBackup 可以开始还原，稍微等待确保断开完成
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(500);
+                        } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                        }
+                        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
+                    }).start();
+
+                    serverInstance.stop(false);
                 } else {
                     // 单人游戏逻辑：保存、踢出玩家返回标题界面
                     LOGGER.info("Single-player instance detected. Saving and disconnecting player.");
 
-                    // 1. 保存当前世界ID到客户端暂存区
-                    String levelId = serverInstance.getSavePath(WorldSavePath.ROOT).getFileName().toString();
+                    String levelId = resolveLevelFolder(serverInstance);
                     MineBackupClient.worldToRejoin = levelId;
+                    HotRestoreState.levelIdToRejoin = levelId;
+                    LOGGER.info("Captured level folder for auto rejoin: {}", levelId);
 
-                    // 2. 保存游戏
-                    serverInstance.save(true, false, true);
+                    boolean saveSuccess = serverInstance.save(true, true, true);
+                    if (!saveSuccess) {
+                        LOGGER.warn("World save may be incomplete before hot restore on singleplayer.");
+                    }
 
-                    // 3. 踢出玩家 (这将自动关闭集成服务器)
-                    ServerPlayerEntity singlePlayer = serverInstance.getPlayerManager().getPlayerList().get(0);
+                    var players = serverInstance.getPlayerManager().getPlayerList();
                     Text kickMessage = Text.translatable("minebackup.message.restore.kick");
-                    singlePlayer.networkHandler.disconnect(kickMessage);
+                    for (ServerPlayerEntity player : players.toArray(new ServerPlayerEntity[0])) {
+                        try {
+                            player.networkHandler.disconnect(kickMessage);
+                        } catch (Exception e) {
+                            LOGGER.warn("Failed to disconnect player {}",  e.getMessage());
+                        }
+                    }
 
-                    // 4. 通知MineBackup可以开始了
-                    OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
+                    // 通过短暂延迟确保客户端完全退出世界后再通知主程序
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(400);
+                        } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                        }
+                        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
+                    }).start();
                 }
             });
             return;
@@ -167,19 +257,24 @@ public class MineBackup implements ModInitializer {
 
         // 收到还原完成信号
         if ("restore_finished".equals(eventType)) {
+            // 主程序通知还原完成，触发自动重连
             MineBackupClient.readyToRejoin = true;
+            if (HotRestoreState.levelIdToRejoin != null && MineBackupClient.worldToRejoin == null) {
+                MineBackupClient.worldToRejoin = HotRestoreState.levelIdToRejoin;
+            }
+            HotRestoreState.waitingForServerStopAck = false;
             LOGGER.info("Restore successful. Flagging client to rejoin world.");
             return;
         }
 
         final Text message = switch (eventType) {
-            case "backup_started" -> Text.translatable("minebackup.broadcast.backup.started", eventData.getOrDefault("world", "Unknown World"));
-            case "restore_started" -> Text.translatable("minebackup.broadcast.restore.started", eventData.getOrDefault("world", "Unknown World"));
-            case "backup_success" -> Text.translatable("minebackup.broadcast.backup.success", eventData.getOrDefault("world", "Unknown World"), eventData.getOrDefault("file", "未知文件"));
-            case "backup_failed" -> Text.translatable("minebackup.broadcast.backup.failed", eventData.getOrDefault("world", "Unknown World"), eventData.getOrDefault("error", "未知错误"));
-            case "game_session_end" -> Text.translatable("minebackup.broadcast.session.end", eventData.getOrDefault("world", "Unknown World"));
-            case "auto_backup_started" -> Text.translatable("minebackup.broadcast.auto_backup.started", eventData.getOrDefault("world", "Unknown World"));
-            case "we_snapshot_completed" -> Text.translatable("minebackup.broadcast.we_snapshot.completed", eventData.getOrDefault("world", "Unknown World"), eventData.getOrDefault("file", "未知文件"));
+            case "backup_started" -> Text.translatable("minebackup.broadcast.backup.started", getWorldDisplay(eventData));
+            case "restore_started" -> Text.translatable("minebackup.broadcast.restore.started", getWorldDisplay(eventData));
+            case "backup_success" -> Text.translatable("minebackup.broadcast.backup.success", getWorldDisplay(eventData), getFileDisplay(eventData));
+            case "backup_failed" -> Text.translatable("minebackup.broadcast.backup.failed", getWorldDisplay(eventData), getErrorDisplay(eventData));
+            case "game_session_end" -> Text.translatable("minebackup.broadcast.session.end", getWorldDisplay(eventData));
+            case "auto_backup_started" -> Text.translatable("minebackup.broadcast.auto_backup.started", getWorldDisplay(eventData));
+            case "we_snapshot_completed" -> Text.translatable("minebackup.broadcast.we_snapshot.completed", getWorldDisplay(eventData), getFileDisplay(eventData));
             default -> null;
         };
 
@@ -187,6 +282,8 @@ public class MineBackup implements ModInitializer {
         if ("pre_hot_backup".equals(eventType)) {
             serverInstance.execute(() -> {
                 LOGGER.info("Executing immediate save for pre_hot_backup event.");
+                // 在热备份前触发 GCA 假人保存（如果存在）
+                trySaveGcaFakePlayers(serverInstance);
                 String worldName = serverInstance.getSaveProperties().getLevelName();
                 serverInstance.getPlayerManager().broadcast(Text.translatable("minebackup.broadcast.hot_backup.request", worldName), false);
                 boolean allSaved = serverInstance.save(true, true, true);
