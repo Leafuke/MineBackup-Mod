@@ -25,13 +25,34 @@ public final class HotRestoreState {
      */
     public static volatile boolean isRestoring = false;
 
+    // ========== KnotLink 握手信息 ==========
+
+    /** 握手是否已完成 */
+    public static volatile boolean handshakeCompleted = false;
+    /** 主程序版本号（握手时获取） */
+    public static volatile String mainProgramVersion = null;
+    /** 版本兼容性标记（模组版本是否满足主程序的最低要求） */
+    public static volatile boolean versionCompatible = true;
+    /** 主程序要求的最低模组版本 */
+    public static volatile String requiredMinModVersion = null;
+
     /**
-     * 重置所有状态标志
+     * 重置所有还原相关状态
      * 在还原完成或取消时调用
      */
     public static void reset() {
         waitingForServerStopAck = false;
         levelIdToRejoin = null;
         isRestoring = false;
+    }
+
+    /**
+     * 重置握手状态
+     */
+    public static void resetHandshake() {
+        handshakeCompleted = false;
+        mainProgramVersion = null;
+        versionCompatible = true;
+        requiredMinModVersion = null;
     }
 }

@@ -61,6 +61,10 @@
   "minebackup.message.restore.entering": "§6[MineBackup] §e正在进入存档...",
   "minebackup.message.restore.waiting": "§6[MineBackup] §e正在等待还原完成...",
   "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §f'%s' §a的快照已成功创建并被WE识别。",
-  "minebackup.message.add_to_we.response": "§aMineBackup 响应: §f%s"
+  "minebackup.message.add_to_we.response": "§aMineBackup 响应: §f%s",
+
+  "minebackup.message.handshake.success": "§a[MineBackup] §e已连接到 MineBackup 主程序 §fv%s§e。",
+  "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4警告: 模组版本 §f%s §4低于主程序要求的最低版本 §f%s§4，部分功能可能无法正常工作！",
+  "minebackup.message.restore.failed_status": "§c[MineBackup] §4主程序报告还原失败，自动重连已取消。"
 }
 

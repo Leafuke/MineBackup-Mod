@@ -15,6 +15,7 @@ import net.minecraft.world.level.storage.LevelResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
@@ -26,6 +27,8 @@ import java.util.Map;
 public class MineBackup implements ModInitializer {
 
     public static final String MOD_ID = "minebackup";
+    // KnotLink 协议版本号，用于与主程序握手时进行版本兼容性检查
+    public static final String MOD_VERSION = "1.0.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     // KnotLink 订阅器实例
@@ -141,16 +144,92 @@ public class MineBackup implements ModInitializer {
     }
 
     /**
-     * 尝试解析当前世界存档文件夹名
+     * 尝试解析当前世界存档文件夹名。
+     *
+     * 说明：
+     * 1) 自动重进要求的是存档目录名（levelId），而不是显示名称。
+     * 2) 某些情况下 ROOT 路径可能不是最终世界根目录，需要向上回溯 level.dat。
+     * 3) 目录名可能是中文或英文，直接保留原始字符串即可。
      */
     private String resolveLevelFolder(MinecraftServer server) {
+        String levelIdFromPath = null;
         try {
             Path root = server.getWorldPath(LevelResource.ROOT);
-            if (root != null && root.getFileName() != null) {
-                return root.getFileName().toString();
-            }
+            levelIdFromPath = resolveLevelIdFromPath(root);
         } catch (Exception ignored) { }
-        return server.getWorldData().getLevelName();
+
+        if (isValidLevelId(levelIdFromPath)) {
+            return levelIdFromPath;
+        }
+
+        String levelName = server.getWorldData().getLevelName();
+        if (isValidLevelId(levelName)) {
+            return levelName;
+        }
+        return "world";
+    }
+
+    /**
+     * 从路径中提取真正的世界目录名。
+     * 若当前路径不是世界根目录，则向上查找包含 level.dat 的目录。
+     */
+    private String resolveLevelIdFromPath(Path path) {
+        if (path == null) {
+            return null;
+        }
+
+        Path cursor = path;
+        for (int i = 0; i < 6 && cursor != null; i++) {
+            if (Files.exists(cursor.resolve("level.dat"))) {
+                Path fileName = cursor.getFileName();
+                if (fileName != null) {
+                    String levelId = fileName.toString();
+                    if (isValidLevelId(levelId)) {
+                        return levelId;
+                    }
+                }
+            }
+            cursor = cursor.getParent();
+        }
+
+        Path fileName = path.getFileName();
+        if (fileName == null) {
+            return null;
+        }
+        String levelId = fileName.toString();
+        return isValidLevelId(levelId) ? levelId : null;
+    }
+
+    /**
+     * 校验世界目录名是否可用于自动重进。
+     * 禁止 "." / ".." 以及带路径分隔符的值，避免误用当前目录。
+     */
+    private boolean isValidLevelId(String levelId) {
+        if (levelId == null) {
+            return false;
+        }
+        String normalized = levelId.trim();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        if (".".equals(normalized) || "..".equals(normalized)) {
+            return false;
+        }
+        return !normalized.contains("/") && !normalized.contains("\\");
+    }
+
+    /**
+     * 计算最终用于重进的 levelId，优先服务端解析，失败时回退到事件 world 字段。
+     */
+    private String resolveRejoinLevelId(MinecraftServer server, String eventWorld) {
+        String resolved = resolveLevelFolder(server);
+        if (isValidLevelId(resolved)) {
+            return resolved;
+        }
+        if (isValidLevelId(eventWorld)) {
+            return eventWorld.trim();
+        }
+        return "world";
     }
 
     /**
@@ -160,6 +239,52 @@ public class MineBackup implements ModInitializer {
     private static void BroadcastEvent(String event) {
         SignalSender sender = new SignalSender(BROADCAST_APP_ID, BROADCAST_SIGNAL_ID);
         sender.emitt(event);
+    }
+
+    /**
+     * 热备份前执行“完整保存”。
+     *
+     * 不同版本/映射方法名可能不同，按优先级尝试：
+     * 1) saveEverything（优先，通常包含 level.dat 等全局元数据）
+     * 2) save
+     * 3) saveAllChunks（最后回退）
+     */
+    private boolean saveAllDataForHotBackup(MinecraftServer server) {
+        if (server == null) {
+            return false;
+        }
+        Boolean byEverything = invokeServerSaveMethod(server, "saveEverything");
+        if (byEverything != null) {
+            return byEverything;
+        }
+        Boolean bySave = invokeServerSaveMethod(server, "save");
+        if (bySave != null) {
+            return bySave;
+        }
+        Boolean byChunks = invokeServerSaveMethod(server, "saveAllChunks");
+        return byChunks != null && byChunks;
+    }
+
+    /**
+     * 反射调用服务器保存方法，返回：
+     * - true/false：方法调用成功并得到布尔结果
+     * - null：方法不存在或调用失败（上层继续回退）
+     */
+    private Boolean invokeServerSaveMethod(MinecraftServer server, String methodName) {
+        try {
+            java.lang.reflect.Method method = server.getClass().getMethod(
+                    methodName, boolean.class, boolean.class, boolean.class);
+            Object result = method.invoke(server, true, true, true);
+            if (method.getReturnType() == boolean.class || method.getReturnType() == Boolean.class) {
+                return Boolean.TRUE.equals(result);
+            }
+            return true;
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        } catch (Throwable t) {
+            LOGGER.warn("[MineBackup] 调用 {} 进行完整保存时失败: {}", methodName, t.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -191,6 +316,51 @@ public class MineBackup implements ModInitializer {
         Map<String, String> eventData = parsePayload(payload);
         String eventType = eventData.get("event");
         if (eventType == null) return;
+
+        // ========== KnotLink 新协议：处理主程序发来的握手请求 ==========
+        if ("handshake".equals(eventType)) {
+            String mainVersion = eventData.get("version");
+            String action = eventData.get("action");
+            String world = eventData.get("world");
+            String minModVersion = eventData.get("min_mod_version");
+
+            LOGGER.info("[MineBackup] 收到握手请求: 主程序v{}, action={}, world={}, min_mod_version={}",
+                    mainVersion, action, world, minModVersion);
+
+            // 存储握手信息
+            HotRestoreState.mainProgramVersion = mainVersion;
+            HotRestoreState.handshakeCompleted = true;
+            HotRestoreState.requiredMinModVersion = minModVersion;
+
+            // 检查版本兼容性
+            boolean compatible = isVersionCompatible(MOD_VERSION, minModVersion);
+            HotRestoreState.versionCompatible = compatible;
+
+            // 回复握手响应
+            OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "HANDSHAKE_RESPONSE " + MOD_VERSION);
+            LOGGER.info("[MineBackup] 已发送 HANDSHAKE_RESPONSE，模组版本: {}", MOD_VERSION);
+
+            // 版本不兼容时警告玩家
+            if (!compatible) {
+                try {
+                    serverInstance.execute(() -> {
+                        serverInstance.getPlayerList().broadcastSystemMessage(
+                                Component.translatable("minebackup.message.handshake.version_incompatible",
+                                        MOD_VERSION, minModVersion != null ? minModVersion : "?"), false);
+                    });
+                } catch (Exception ignored) { }
+                LOGGER.warn("[MineBackup] 模组版本 {} 不满足最低要求 {}", MOD_VERSION, minModVersion);
+            } else {
+                try {
+                    serverInstance.execute(() -> {
+                        serverInstance.getPlayerList().broadcastSystemMessage(
+                                Component.translatable("minebackup.message.handshake.success",
+                                        mainVersion != null ? mainVersion : "?"), false);
+                    });
+                } catch (Exception ignored) { }
+            }
+            return;
+        }
 
         // 处理热还原前的准备事件
         if ("pre_hot_restore".equals(eventType)) {
@@ -233,7 +403,9 @@ public class MineBackup implements ModInitializer {
                         } catch (InterruptedException ignored) {
                             Thread.currentThread().interrupt();
                         }
-                        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
+                        // KnotLink 新协议：只发送 WORLD_SAVE_AND_EXIT_COMPLETE，避免与旧信号重复触发
+                        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVE_AND_EXIT_COMPLETE");
+                        LOGGER.info("[MineBackup] 已发送 WORLD_SAVE_AND_EXIT_COMPLETE (专用服务器)");
                     }).start();
 
                     // 停止服务器
@@ -243,7 +415,7 @@ public class MineBackup implements ModInitializer {
                     LOGGER.info("[MineBackup] 检测到单人游戏，保存并断开连接");
 
                     // 1. 获取当前世界存档文件夹名称
-                    String levelId = resolveLevelFolder(serverInstance);
+                    String levelId = resolveRejoinLevelId(serverInstance, eventData.get("world"));
                     MineBackupClient.worldToRejoin = levelId;
                     HotRestoreState.levelIdToRejoin = levelId;
                     LOGGER.info("[MineBackup] 保存世界ID用于自动重连: {}", levelId);
@@ -276,8 +448,9 @@ public class MineBackup implements ModInitializer {
                         try {
                             // 等待一小段时间确保断开连接完成
                             Thread.sleep(500);
-                            OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "SHUTDOWN_WORLD_SUCCESS");
-                            LOGGER.info("[MineBackup] 已通知主程序可以开始还原");
+                            // KnotLink 新协议：只发送 WORLD_SAVE_AND_EXIT_COMPLETE，避免与旧信号重复触发
+                            OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVE_AND_EXIT_COMPLETE");
+                            LOGGER.info("[MineBackup] 已发送 WORLD_SAVE_AND_EXIT_COMPLETE (单人游戏)");
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
@@ -287,15 +460,54 @@ public class MineBackup implements ModInitializer {
             return;
         }
 
-        // 收到还原完成信号
+        // ========== 收到还原完成信号 ==========
         if ("restore_finished".equals(eventType)) {
-            // 主程序通知还原完成，触发自动重连
-            MineBackupClient.readyToRejoin = true;
+            String status = eventData.getOrDefault("status", "success");
+            if ("success".equals(status)) {
+                String worldFromEvent = eventData.get("world");
+                if (isValidLevelId(worldFromEvent)) {
+                    String fallbackLevelId = worldFromEvent.trim();
+                    if (!isValidLevelId(HotRestoreState.levelIdToRejoin)) {
+                        HotRestoreState.levelIdToRejoin = fallbackLevelId;
+                    }
+                    if (!isValidLevelId(MineBackupClient.worldToRejoin)) {
+                        MineBackupClient.worldToRejoin = fallbackLevelId;
+                    }
+                }
+                MineBackupClient.readyToRejoin = true;
+                if (HotRestoreState.levelIdToRejoin != null && MineBackupClient.worldToRejoin == null) {
+                    MineBackupClient.worldToRejoin = HotRestoreState.levelIdToRejoin;
+                }
+                HotRestoreState.waitingForServerStopAck = false;
+                LOGGER.info("[MineBackup] 还原成功，已标记客户端准备重新加入世界");
+            } else {
+                LOGGER.warn("[MineBackup] 主程序报告还原失败，status={}", status);
+                MineBackupClient.readyToRejoin = false;
+                HotRestoreState.reset();
+            }
+            return;
+        }
+
+        // ========== KnotLink 新协议：处理主程序请求重新加入世界 ==========
+        if ("rejoin_world".equals(eventType)) {
+            LOGGER.info("[MineBackup] 收到 rejoin_world 事件，触发客户端重连");
+            String worldFromEvent = eventData.get("world");
+            if (isValidLevelId(worldFromEvent)) {
+                String fallbackLevelId = worldFromEvent.trim();
+                if (!isValidLevelId(HotRestoreState.levelIdToRejoin)) {
+                    HotRestoreState.levelIdToRejoin = fallbackLevelId;
+                }
+                if (!isValidLevelId(MineBackupClient.worldToRejoin)) {
+                    MineBackupClient.worldToRejoin = fallbackLevelId;
+                }
+            }
             if (HotRestoreState.levelIdToRejoin != null && MineBackupClient.worldToRejoin == null) {
                 MineBackupClient.worldToRejoin = HotRestoreState.levelIdToRejoin;
             }
+            if (!MineBackupClient.readyToRejoin && MineBackupClient.worldToRejoin != null) {
+                MineBackupClient.readyToRejoin = true;
+            }
             HotRestoreState.waitingForServerStopAck = false;
-            LOGGER.info("[MineBackup] 还原成功，准备自动重连");
             return;
         }
 
@@ -327,7 +539,8 @@ public class MineBackup implements ModInitializer {
                 String worldName = serverInstance.getWorldData().getLevelName();
                 serverInstance.getPlayerList().broadcastSystemMessage(
                     Component.translatable("minebackup.broadcast.hot_backup.request", worldName), false);
-                boolean allSaved = serverInstance.saveAllChunks(true, true, true);
+                // 使用“完整保存”路径，确保 level.dat 与区块文件同步落盘
+                boolean allSaved = saveAllDataForHotBackup(serverInstance);
                 if (!allSaved) {
                     LOGGER.warn("[MineBackup] 部分数据保存失败，世界: {}", worldName);
                     serverInstance.getPlayerList().broadcastSystemMessage(
@@ -336,6 +549,9 @@ public class MineBackup implements ModInitializer {
                 LOGGER.info("[MineBackup] 世界数据保存完成");
                 serverInstance.getPlayerList().broadcastSystemMessage(
                     Component.translatable("minebackup.broadcast.hot_backup.complete"), false);
+                // KnotLink 新协议：通知主程序世界保存已完成
+                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVED");
+                LOGGER.info("[MineBackup] 已发送 WORLD_SAVED 通知");
             });
         } else if ("game_session_start".equals(eventType)) {
             LOGGER.info("[MineBackup] 检测到游戏会话开始，世界: {}", getWorldDisplay(eventData).getString());
@@ -345,5 +561,35 @@ public class MineBackup implements ModInitializer {
         if (message != null) {
             serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(message, false));
         }
+    }
+
+    /**
+     * 版本号比较工具：检查当前版本是否满足最低要求
+     * 格式为 major.minor.patch（如 "1.0.0"）
+     */
+    public static boolean isVersionCompatible(String current, String required) {
+        if (required == null || required.isBlank()) return true;
+        if (current == null || current.isBlank()) return false;
+        try {
+            int[] c = parseVersionParts(current);
+            int[] r = parseVersionParts(required);
+            for (int i = 0; i < 3; i++) {
+                if (c[i] > r[i]) return true;
+                if (c[i] < r[i]) return false;
+            }
+            return true;
+        } catch (Exception e) {
+            LOGGER.warn("版本号解析失败: current={}, required={}", current, required);
+            return false;
+        }
+    }
+
+    private static int[] parseVersionParts(String version) {
+        String[] parts = version.split("\\.");
+        int[] result = new int[3];
+        for (int i = 0; i < Math.min(parts.length, 3); i++) {
+            result[i] = Integer.parseInt(parts[i].trim());
+        }
+        return result;
     }
 }

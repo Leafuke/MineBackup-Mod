@@ -61,5 +61,10 @@
   "minebackup.message.restore.entering": "§6[MineBackup] §eEntering world...",
   "minebackup.message.restore.waiting": "§6[MineBackup] §eWaiting for restore to complete...",
   "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §eWorldEdit snapshot for §f'%s' §acompleted successfully.",
-  "minebackup.message.add_to_we.response": "§aMineBackup: §f%s"
+  "minebackup.message.add_to_we.response": "§aMineBackup: §f%s",
+
+  "minebackup.message.handshake.success": "§a[MineBackup] §eConnected to MineBackup main program §fv%s§e.",
+  "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4WARNING: Mod version §f%s §4is lower than the required minimum §f%s§4. Some features may not work correctly!",
+  "minebackup.message.handshake.main_version_incompatible": "§c[MineBackup] §4WARNING: Main program version §f%s §4is lower than the required minimum §f%s§4. Aborting connection to prevent potential issues!",
+  "minebackup.message.restore.failed_status": "§c[MineBackup] §4Main program reported restore failure. Auto-rejoin cancelled."
 }

@@ -41,9 +41,7 @@
   "minebackup.message.auto_backup.response": "§aMineBackup 响应: §f%s",
   "minebackup.message.stop_auto_backup.response": "§aMineBackup 响应: §f%s",
   "minebackup.message.backup_current.response": "§aMineBackup 响应: §f%s",
-
   "minebackup.message.snap.sent": "§e发送指令以创建WE快照: §f%s",
-
   "minebackup.broadcast.backup.started": "§6[MineBackup] §e正在为世界 §f'%s' §e创建备份...",
   "minebackup.broadcast.restore.started": "§6[MineBackup] §e正在从备份还原世界 §f'%s'§e...",
   "minebackup.broadcast.backup.success": "§a[MineBackup] §2备份完成! §e世界 §f'%s' §a已保存为 §f%s",
@@ -53,7 +51,6 @@
   "minebackup.broadcast.hot_backup.complete": "§a[MineBackup] §e世界数据已保存，备份程序已开始运行。",
   "minebackup.broadcast.session.end": "§7[MineBackup] §f'%s' §7的游戏会话已结束，可能已在后台触发备份。",
   "minebackup.broadcast.auto_backup.started": "§6[MineBackup] §e世界 §f'%s' §e的自动备份任务已启动。",
-
   "minebackup.message.restore.preparing": "§6[MineBackup] §e收到热还原请求，正在准备世界...",
   "minebackup.message.restore.kick": "§6[MineBackup] §e正在为您还原存档，稍后将自动重连...§r",
   "minebackup.message.restore.rejoining": "§a[MineBackup] §e还原完成！正在重新加入世界...",
@@ -61,6 +58,10 @@
   "minebackup.message.restore.entering": "§6[MineBackup] §e正在进入存档...",
   "minebackup.message.restore.waiting": "§6[MineBackup] §e正在等待还原完成...",
   "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §f'%s' §a的快照已成功创建并被WE识别。",
-  "minebackup.message.add_to_we.response": "§aMineBackup 响应: §f%s"
+  "minebackup.message.add_to_we.response": "§aMineBackup 响应: §f%s",
 
+  "minebackup.message.handshake.success": "§a[MineBackup] §e已连接到 MineBackup 主程序 §fv%s§e。",
+  "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4警告: 模组版本 §f%s §4低于主程序要求的最低版本 §f%s§4，部分功能可能无法正常工作！",
+  "minebackup.message.handshake.main_version_incompatible": "§c[MineBackup] §4警告: 主程序版本 §f%s §4低于模组要求的最低版本 §f%s§4。正在停止...",
+  "minebackup.message.restore.failed_status": "§c[MineBackup] §4主程序报告还原失败，自动重连已取消。"
 }
