@@ -46,13 +46,7 @@ public class Command {
                 // 1. 本地保存指令
                 .then(Commands.literal("save")
                         .executes(ctx -> {
-                            CommandSourceStack source = ctx.getSource();
-                            MinecraftServer server = source.getServer();
-                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
-                            for (ServerLevel level : server.getAllLevels()) {
-                                level.save(null, true, false);
-                            }
-                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
+                            saveAllWorlds(ctx.getSource());
                             return 1;
                         })
                 )
@@ -141,23 +135,13 @@ public class Command {
                 .then(Commands.literal("quicksave")
                         .executes(ctx -> {
                             CommandSourceStack source = ctx.getSource();
-                            MinecraftServer server = source.getServer();
-                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
-                            for (ServerLevel level : server.getAllLevels()) {
-                                level.save(null, true, false);
-                            }
-                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
+                            saveAllWorlds(source);
                             return executeRemoteCommand(source, "BACKUP_CURRENT");
                         })
                         .then(Commands.argument("comment", StringArgumentType.greedyString())
                                 .executes(ctx -> {
                                     CommandSourceStack source = ctx.getSource();
-                                    MinecraftServer server = source.getServer();
-                                    source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
-                                    for (ServerLevel level : server.getAllLevels()) {
-                                        level.save(null, true, false);
-                                    }
-                                    source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
+                                    saveAllWorlds(source);
                                     return executeRemoteCommand(source,
                                             String.format("BACKUP_CURRENT %s", StringArgumentType.getString(ctx, "comment")));
                                 })
@@ -263,15 +247,28 @@ public class Command {
         }
         future
             .exceptionally(ex -> {
-                // 记录异常（在开发时可换成日志），并返回统一错误前缀
-                ex.printStackTrace();
+                MineBackup.LOGGER.error("与 MineBackup 主程序通信异常: {}", ex.getMessage());
                 return "ERROR:COMMUNICATION_FAILED";
             })
             .thenAccept(resp -> {
                 try {
                     callback.accept(resp);
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    MineBackup.LOGGER.error("处理后端响应时发生异常: {}", e.getMessage());
+                }
             });
+    }
+
+    /**
+     * 执行本地所有维度落盘，保证远程备份前数据尽量一致。
+     */
+    private static void saveAllWorlds(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
+        for (ServerLevel level : server.getAllLevels()) {
+            level.save(null, true, false);
+        }
+        source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
     }
 
     /**
@@ -318,7 +315,6 @@ public class Command {
             return 0;
         }
         source.sendSuccess(() -> Component.translatable("minebackup.message.command.sent", command), false);
-        String[] parts = command.split(" ");
         String commandType = command.split(" ")[0].toLowerCase();
         queryBackend(command, response -> handleGenericResponse(source, response, commandType));
         return 1;
@@ -424,7 +420,7 @@ public class Command {
                 })
                 .exceptionally(ex -> {
                     // 出现异常时返回空建议（避免抛出）
-                    ex.printStackTrace();
+                    MineBackup.LOGGER.warn("获取备份文件补全失败: {}", ex.getMessage());
                     return builder.build();
                 });
     }

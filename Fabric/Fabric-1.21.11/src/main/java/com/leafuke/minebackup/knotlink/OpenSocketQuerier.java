@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -17,7 +18,7 @@ public class OpenSocketQuerier {
     public static CompletableFuture<String> query(String appID, String openSocketID, String question) {
         return CompletableFuture.supplyAsync(() -> {
             try (Socket socket = new Socket(SERVER_IP, QUERIER_PORT);
-                 PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                 PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
                  InputStream in = socket.getInputStream()) {
 
                 socket.setSoTimeout(5000); // 5秒超时
@@ -42,7 +43,7 @@ public class OpenSocketQuerier {
                 }
 
             } catch (Exception e) {
-                LOGGER.error("Failed to query KnotLink server: {}", e.getMessage());
+                LOGGER.error("Failed to query KnotLink server for command '{}': {}", question, e.getMessage());
                 return "ERROR:COMMUNICATION_FAILED";
             }
         });

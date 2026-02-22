@@ -2,7 +2,6 @@ package com.leafuke.minebackup;
 
 import com.leafuke.minebackup.knotlink.OpenSocketQuerier;
 import com.leafuke.minebackup.knotlink.SignalSubscriber;
-import com.leafuke.minebackup.knotlink.SignalSender;
 import com.leafuke.minebackup.restore.HotRestoreState;
 import com.leafuke.minebackup.compat.GcaCompat;
 import net.fabricmc.api.ModInitializer;
@@ -230,15 +229,6 @@ public class MineBackup implements ModInitializer {
             return eventWorld.trim();
         }
         return "world";
-    }
-
-    /**
-     * 发送广播事件
-     * @param event 事件内容
-     */
-    private static void BroadcastEvent(String event) {
-        SignalSender sender = new SignalSender(BROADCAST_APP_ID, BROADCAST_SIGNAL_ID);
-        sender.emitt(event);
     }
 
     /**

@@ -22,9 +22,6 @@
         "com.leafuke.minebackup.MineBackupClient"
       ]
     },
-	"mixins": [
-		"minebackup.mixins.json"
-	],
 	"depends": {
 		"fabricloader": ">=0.17.3",
 		"minecraft": "~1.21",

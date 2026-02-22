@@ -1,5 +1,8 @@
 package com.leafuke.minebackup.knotlink;
 
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
+
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.net.Socket;
@@ -8,12 +11,13 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class TcpClient {
+    private static final Logger LOGGER = LogUtils.getLogger();
     private Socket socket;
     private PrintWriter out;
     private InputStream in;
-    private ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    private String heartbeatMessage = "heartbeat";
-    private String heartbeatResponse = "heartbeat_response";
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final String heartbeatMessage = "heartbeat";
+    private final String heartbeatResponse = "heartbeat_response";
     private boolean running = false;
 
     public TcpClient() {
@@ -24,12 +28,14 @@ public class TcpClient {
             this.socket = new Socket(host, port);
             this.out = new PrintWriter(new OutputStreamWriter(this.socket.getOutputStream(), StandardCharsets.UTF_8), true);
             this.in = this.socket.getInputStream();
-            System.out.println("Connected to server at " + host + ":" + port);
-            (new Thread(this::readData)).start();
+            LOGGER.info("Connected to KnotLink server at {}:{}", host, port);
+            Thread reader = new Thread(this::readData, "minebackup-knotlink-reader");
+            reader.setDaemon(true);
+            reader.start();
             this.startHeartbeat();
             return true;
         } catch (IOException e) {
-            System.err.println("Failed to connect to server: " + e.getMessage());
+            LOGGER.error("Failed to connect to KnotLink server: {}", e.getMessage());
             return false;
         }
     }
@@ -39,7 +45,7 @@ public class TcpClient {
             this.out.print(data); // 使用 print 方法，不会添加换行符
             this.out.flush(); // 确保数据立即发送
         } else {
-            System.err.println("Socket is not connected.");
+            LOGGER.warn("Socket is not connected.");
         }
     }
 
@@ -58,7 +64,7 @@ public class TcpClient {
     }
 
     private void readData() {
-        System.out.println("DEBUG: Start reading from server...");
+        LOGGER.debug("Start reading data from KnotLink server...");
         try {
             byte[] buffer = new byte[1024];
             while (true) {
@@ -67,7 +73,7 @@ public class TcpClient {
                     break; // 如果没有数据可读，退出循环
                 }
                 String receivedData = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
-                System.out.println("Received raw data: " + receivedData);
+                LOGGER.debug("Received raw data: {}", receivedData);
                 if (receivedData.trim().equals(heartbeatResponse)) {
                     continue; // 如果是心跳响应，跳过处理
                 }
@@ -77,10 +83,10 @@ public class TcpClient {
                 }
             }
         } catch (IOException e) {
-            System.err.println("Socket error: " + e.getMessage());
+            LOGGER.warn("KnotLink socket error: {}", e.getMessage());
         } finally {
             stopHeartbeat();
-            System.out.println("Server disconnected.");
+            LOGGER.info("KnotLink server disconnected.");
         }
     }
 
@@ -92,7 +98,7 @@ public class TcpClient {
 
     public void setDataReceivedListener(DataReceivedListener listener) {
         this.dataReceivedListener = listener;
-        System.out.println("DataReceivedListener set successfully.");
+        LOGGER.debug("DataReceivedListener set successfully.");
     }
 
     public void close() {
@@ -102,7 +108,7 @@ public class TcpClient {
                 this.socket.close();
             }
         } catch (IOException e) {
-            System.err.println("Error closing socket: " + e.getMessage());
+            LOGGER.warn("Error closing socket: {}", e.getMessage());
         }
     }
 }

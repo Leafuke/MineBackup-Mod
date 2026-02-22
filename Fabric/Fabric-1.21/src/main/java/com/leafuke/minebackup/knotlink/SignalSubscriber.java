@@ -5,7 +5,7 @@ import org.slf4j.Logger;
 
 public class SignalSubscriber {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private TcpClient KLsubscriber;
+    private TcpClient knotLinkSubscriber;
     private final String appID;
     private final String signalID;
 
@@ -26,18 +26,20 @@ public class SignalSubscriber {
     }
 
     public void start() {
-        KLsubscriber = new TcpClient();
+        knotLinkSubscriber = new TcpClient();
         // SignalSubscriber 连接到端口 6372
-        if (KLsubscriber.connectToServer("127.0.0.1", 6372)) {
+        if (knotLinkSubscriber.connectToServer("127.0.0.1", 6372)) {
             // 设置数据接收监听器
-            KLsubscriber.setDataReceivedListener(data -> {
-                System.out.println("DEBUG: Raw data received from KnotLink: " + data);
-                signalListener.onSignalReceived(data);
+            knotLinkSubscriber.setDataReceivedListener(data -> {
+                LOGGER.debug("收到 KnotLink 广播数据: {}", data);
+                if (signalListener != null) {
+                    signalListener.onSignalReceived(data);
+                }
             });
 
             // 发送订阅请求
             String s_key = appID + "-" + signalID;
-            KLsubscriber.sendData(s_key);
+            knotLinkSubscriber.sendData(s_key);
             LOGGER.info("SignalSubscriber started and subscribed to {}.", s_key);
         } else {
             LOGGER.error("SignalSubscriber failed to start.");
@@ -45,8 +47,8 @@ public class SignalSubscriber {
     }
 
     public void stop() {
-        if (KLsubscriber != null) {
-            KLsubscriber.close();
+        if (knotLinkSubscriber != null) {
+            knotLinkSubscriber.close();
             LOGGER.info("SignalSubscriber stopped.");
         }
     }

@@ -1,7 +1,6 @@
 package com.leafuke.minebackup;
 
 import com.leafuke.minebackup.knotlink.OpenSocketQuerier;
-import com.leafuke.minebackup.knotlink.SignalSender;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -13,6 +12,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -43,13 +43,8 @@ public class Command {
                 // 1. 本地保存指令
                 .then(net.minecraft.server.command.CommandManager.literal("save")
                         .executes((CommandContext<ServerCommandSource> ctx) -> {
-                            ServerCommandSource source = ctx.getSource();
-                            MinecraftServer server = source.getServer();
-                            source.sendFeedback(() -> Text.translatable("minebackup.message.save.start"), true);
-                            for (ServerWorld world : server.getWorlds()) {
-                                world.save(null, true, false);
-                            }
-                            source.sendFeedback(() -> Text.translatable("minebackup.message.save.success"), true);
+                            // 仅执行本地落盘，不触发远程备份。
+                            saveAllWorlds(ctx.getSource());
                             return 1;
                         })
                 )
@@ -125,29 +120,16 @@ public class Command {
                 )
                 .then(net.minecraft.server.command.CommandManager.literal("quicksave")
                         .executes(ctx -> {
-                            ServerCommandSource source = ctx.getSource();
-                            MinecraftServer server = source.getServer();
-                            source.sendFeedback(() -> Text.translatable("minebackup.message.save.start"), true);
-                            for (ServerWorld world : server.getWorlds()) {
-                                world.save(null, true, false);
-                            }
-                            source.sendFeedback(() -> Text.translatable("minebackup.message.save.success"), true);
-                            return 1;
+                            // 先执行本地保存，再请求后端进行当前世界备份。
+                            saveAllWorlds(ctx.getSource());
+                            return executeRemoteCommand(ctx.getSource(), "BACKUP_CURRENT");
                         })
-                        .executes(ctx -> executeRemoteCommand(ctx.getSource(), "BACKUP_CURRENT"))
                         .then(net.minecraft.server.command.CommandManager.argument("comment", StringArgumentType.greedyString())
                                 .executes(ctx -> {
-                                    ServerCommandSource source = ctx.getSource();
-                                    MinecraftServer server = source.getServer();
-                                    source.sendFeedback(() -> Text.translatable("minebackup.message.save.start"), true);
-                                    for (ServerWorld world : server.getWorlds()) {
-                                        world.save(null, true, false);
-                                    }
-                                    source.sendFeedback(() -> Text.translatable("minebackup.message.save.success"), true);
-                                    return 1;
+                                    saveAllWorlds(ctx.getSource());
+                                    return executeRemoteCommand(ctx.getSource(),
+                                            String.format("BACKUP_CURRENT %s", StringArgumentType.getString(ctx, "comment")));
                                 })
-                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
-                                        String.format("BACKUP_CURRENT %s", StringArgumentType.getString(ctx, "comment"))))
                         )
                 )
                 .then(net.minecraft.server.command.CommandManager.literal("auto")
@@ -228,7 +210,36 @@ public class Command {
     }
 
     private static void queryBackend(String command, java.util.function.Consumer<String> callback) {
-        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command).thenAccept(callback);
+        // 统一处理通信异常，避免异步异常丢失。
+        CompletableFuture<String> future = OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command);
+        if (future == null) {
+            callback.accept(null);
+            return;
+        }
+        future
+                .exceptionally(ex -> {
+                    MineBackup.LOGGER.error("与 MineBackup 主程序通信异常: {}", ex.getMessage());
+                    return "ERROR:COMMUNICATION_FAILED";
+                })
+                .thenAccept(response -> {
+                    try {
+                        callback.accept(response);
+                    } catch (Exception e) {
+                        MineBackup.LOGGER.error("处理后端响应时发生异常: {}", e.getMessage());
+                    }
+                });
+    }
+
+    /**
+     * 执行本地所有维度落盘，保证热备份前区块与元数据尽量一致。
+     */
+    private static void saveAllWorlds(ServerCommandSource source) {
+        MinecraftServer server = source.getServer();
+        source.sendFeedback(() -> Text.translatable("minebackup.message.save.start"), true);
+        for (ServerWorld world : server.getWorlds()) {
+            world.save(null, true, false);
+        }
+        source.sendFeedback(() -> Text.translatable("minebackup.message.save.success"), true);
     }
 
     private static void handleGenericResponse(ServerCommandSource source, String response, String commandType) {
@@ -343,12 +354,19 @@ public class Command {
                     if (response != null && response.startsWith("OK:")) {
                         String data = response.substring(3);
                         String[] files = data.split(";");
+                        String remaining = builder.getRemaining();
+                        String remLower = remaining == null ? "" : remaining.toLowerCase(Locale.ROOT);
                         for (String file : files) {
-                            if (!file.isEmpty() && file.toLowerCase().startsWith(builder.getRemaining().toLowerCase())) {
-                                builder.suggest("'" + file + "'");
+                            if (!file.isEmpty() && file.toLowerCase(Locale.ROOT).startsWith(remLower)) {
+                                // 直接建议原始文件名，避免强制加引号影响命令输入体验。
+                                builder.suggest(file);
                             }
                         }
                     }
+                    return builder.build();
+                })
+                .exceptionally(ex -> {
+                    MineBackup.LOGGER.warn("获取备份文件补全失败: {}", ex.getMessage());
                     return builder.build();
                 });
     }
