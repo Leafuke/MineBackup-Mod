@@ -1,6 +1,7 @@
 package com.leafuke.minebackup.knotlink;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.net.Socket;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -21,7 +22,7 @@ public class TcpClient {
     public boolean connectToServer(String host, int port) {
         try {
             this.socket = new Socket(host, port);
-            this.out = new PrintWriter(this.socket.getOutputStream(), true);
+            this.out = new PrintWriter(new OutputStreamWriter(this.socket.getOutputStream(), StandardCharsets.UTF_8), true);
             this.in = this.socket.getInputStream();
             System.out.println("Connected to server at " + host + ":" + port);
             (new Thread(this::readData)).start();
@@ -65,7 +66,7 @@ public class TcpClient {
                 if (bytesRead == -1) {
                     break; // 如果没有数据可读，退出循环
                 }
-                String receivedData = new String(buffer, 0, bytesRead);
+                String receivedData = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8);
                 System.out.println("Received raw data: " + receivedData);
                 if (receivedData.trim().equals(heartbeatResponse)) {
                     continue; // 如果是心跳响应，跳过处理

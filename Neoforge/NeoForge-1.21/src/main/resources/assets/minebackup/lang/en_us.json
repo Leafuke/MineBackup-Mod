@@ -58,5 +58,8 @@
   "minebackup.message.restore.kick": "§6[MineBackup] §eRestoring world, you will be reconnected shortly...§r",
   "minebackup.message.restore.rejoining": "§a[MineBackup] §eRestore complete! Rejoining world...",
   "minebackup.message.restore.failed": "§c[MineBackup] §4Restore failed! Auto-rejoin has been cancelled.",
+  "minebackup.message.handshake.success": "§a[MineBackup] §eConnected to MineBackup main program §fv%s§e.",
+  "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4WARNING: Mod version §f%s §4is lower than the required minimum §f%s§4. Some features may not work correctly!",
+  "minebackup.message.handshake.main_version_incompatible": "§c[MineBackup] §4WARNING: Main program version §f%s §4is lower than the required minimum §f%s§4. Aborting connection to prevent potential issues!",
   "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §eWorldEdit snapshot for §f'%s' §acompleted successfully."
 }

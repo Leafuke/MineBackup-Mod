@@ -2,6 +2,10 @@
   "minebackup.message.save.start": "§e正在执行本地世界保存...",
   "minebackup.message.save.success": "§a本地世界保存成功。",
 
+  "minebackup.message.remote_save.start": "§e正在执行远程保存指令...",
+  "minebackup.message.remote_save.success": "§a远程保存完成。",
+  "minebackup.message.remote_save.fail": "§c远程保存失败！",
+
   "minebackup.message.list_configs.start": "§e正在从 MineBackup 查询配置...",
   "minebackup.message.list_configs.success.title": "§a可用配置:",
   "minebackup.message.list_configs.success.entry": "\n §7- §fID: §b%s§7, 名称: §e%s",
@@ -22,11 +26,21 @@
 
   "minebackup.message.command.sent": "§e向 MineBackup 发送指令: §f%s",
   "minebackup.message.command.fail": "§c指令执行失败: §f%s",
+  "minebackup.message.command.invalid": "§c无效指令。",
+  "minebackup.message.command.migrated": "§e指令已迁移为 /mb，请使用 /mb。",
+  "minebackup.message.communication_failed": "通信失败。",
+  "minebackup.message.no_response": "无响应。",
+  "minebackup.message.unknown_world": "未知世界",
+  "minebackup.message.unknown_file": "未知文件",
+  "minebackup.message.unknown_error": "未知错误",
   "minebackup.message.backup.response": "§aMineBackup 响应: §f%s",
   "minebackup.message.restore.response": "§aMineBackup 响应: §f%s",
   "minebackup.message.snap.response": "§aMineBackup 响应: §f%s",
   "minebackup.message.auto.response": "§aMineBackup 响应: §f%s",
   "minebackup.message.stop.response": "§aMineBackup 响应: §f%s",
+  "minebackup.message.auto_backup.response": "§aMineBackup 响应: §f%s",
+  "minebackup.message.stop_auto_backup.response": "§aMineBackup 响应: §f%s",
+  "minebackup.message.backup_current.response": "§aMineBackup 响应: §f%s",
 
   "minebackup.message.snap.sent": "§e发送指令以创建WE快照: §f%s",
 
@@ -44,6 +58,9 @@
   "minebackup.message.restore.kick": "§6[MineBackup] §e正在为您还原存档，稍后将自动重连...§r",
   "minebackup.message.restore.rejoining": "§a[MineBackup] §e还原完成！正在重新加入世界...",
   "minebackup.message.restore.failed": "§c[MineBackup] §4还原失败！自动重连已取消。",
+  "minebackup.message.handshake.success": "§a[MineBackup] §e已连接到 MineBackup 主程序 §fv%s§e。",
+  "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4警告: 模组版本 §f%s §4低于主程序要求的最低版本 §f%s§4，部分功能可能无法正常工作！",
+  "minebackup.message.handshake.main_version_incompatible": "§c[MineBackup] §4警告: 主程序版本 §f%s §4低于模组要求的最低版本 §f%s§4。正在停止...",
   "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §f'%s' §a的快照已成功创建并被WE识别。"
 
 }

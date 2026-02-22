@@ -38,12 +38,12 @@ public class OpenSocketQuerier {
                     return response;
                 } else {
                     LOGGER.warn("Received no response from KnotLink server.");
-                    return "ERROR: No response from MineBackup.";
+                    return "ERROR:NO_RESPONSE";
                 }
 
             } catch (Exception e) {
                 LOGGER.error("Failed to query KnotLink server: {}", e.getMessage());
-                return "ERROR: Cannot connect to MineBackup. Is it running?";
+                return "ERROR:COMMUNICATION_FAILED";
             }
         });
     }

@@ -6,7 +6,6 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -14,6 +13,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
 public class Command {
@@ -21,16 +21,13 @@ public class Command {
     private static final String QUERIER_APP_ID = "0x00000020";
     private static final String QUERIER_SOCKET_ID = "0x00000010";
 
-    // 注册方法的签名已更新以匹配 NeoForge 的 RegisterCommandsEvent
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        // 内部的所有命令定义 (dispatcher.register(...)) 都是基于 Brigadier 的，无需更改。
-        dispatcher.register(Commands.literal("minebackup")
+        dispatcher.register(Commands.literal("mb")
                 .requires(src -> {
                     if (!src.getServer().isDedicatedServer()) return true;
                     return src.hasPermission(2);
-                }) // 需要OP权限
+                })
 
-                // 1. 本地保存指令
                 .then(Commands.literal("save")
                         .executes(ctx -> {
                             CommandSourceStack source = ctx.getSource();
@@ -44,7 +41,6 @@ public class Command {
                         })
                 )
 
-                // 2. 查询配置列表
                 .then(Commands.literal("list_configs")
                         .executes(ctx -> {
                             ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_configs.start"), false);
@@ -53,7 +49,6 @@ public class Command {
                         })
                 )
 
-                // 3. (修正) 列出指定配置中的所有世界
                 .then(Commands.literal("list_worlds")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .executes(ctx -> {
@@ -68,7 +63,6 @@ public class Command {
                         )
                 )
 
-                // 4. 列出指定世界的所有备份文件
                 .then(Commands.literal("list_backups")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
@@ -86,16 +80,15 @@ public class Command {
                         )
                 )
 
-                // 5. 触发一次远程备份
                 .then(Commands.literal("backup")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
-                                        .executes(ctx -> executeRemoteCommand(ctx.getSource(), // 不带评论
+                                        .executes(ctx -> executeRemoteCommand(ctx.getSource(),
                                                 String.format("BACKUP %d %d",
                                                         IntegerArgumentType.getInteger(ctx, "config_id"),
                                                         IntegerArgumentType.getInteger(ctx, "world_index"))))
                                         .then(Commands.argument("comment", StringArgumentType.greedyString())
-                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(), // 带评论
+                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
                                                         String.format("BACKUP %d %d %s",
                                                                 IntegerArgumentType.getInteger(ctx, "config_id"),
                                                                 IntegerArgumentType.getInteger(ctx, "world_index"),
@@ -105,12 +98,11 @@ public class Command {
                         )
                 )
 
-                // 6. (修正自动补全) 执行一次远程还原
                 .then(Commands.literal("restore")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
                                         .then(Commands.argument("backup_file", StringArgumentType.string())
-                                                .suggests((ctx, builder) -> suggestBackupFiles( // 自动补全
+                                                .suggests((ctx, builder) -> suggestBackupFiles(
                                                         IntegerArgumentType.getInteger(ctx, "config_id"),
                                                         IntegerArgumentType.getInteger(ctx, "world_index"),
                                                         builder))
@@ -124,7 +116,6 @@ public class Command {
                         )
                 )
 
-                // 7. 执行被封当前存档的操作
                 .then(Commands.literal("quicksave")
                         .executes(ctx -> {
                             CommandSourceStack source = ctx.getSource();
@@ -134,10 +125,8 @@ public class Command {
                                 level.save(null, true, false);
                             }
                             source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
-                            return 1;
+                            return executeRemoteCommand(source, "BACKUP_CURRENT");
                         })
-                        .executes(ctx ->executeRemoteCommand(ctx.getSource(), // 不带评论
-                                "BACKUP_CURRENT"))
                         .then(Commands.argument("comment", StringArgumentType.greedyString())
                                 .executes(ctx -> {
                                     CommandSourceStack source = ctx.getSource();
@@ -147,15 +136,13 @@ public class Command {
                                         level.save(null, true, false);
                                     }
                                     source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
-                                    return 1;
+                                    return executeRemoteCommand(ctx.getSource(),
+                                            String.format("BACKUP_CURRENT %s",
+                                                    StringArgumentType.getString(ctx, "comment")));
                                 })
-                                .executes(ctx -> executeRemoteCommand(ctx.getSource(), // 带评论
-                                        String.format("BACKUP_CURRENT %s",
-                                                StringArgumentType.getString(ctx, "comment"))))
                         )
                 )
 
-                // 8. 启动远程自动备份
                 .then(Commands.literal("auto")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
@@ -167,47 +154,43 @@ public class Command {
                                                             IntegerArgumentType.getInteger(ctx, "internal_time")
                                                     );
                                                     return executeRemoteCommand(ctx.getSource(),
-                                                        String.format("AUTO_BACKUP %d %d %d",
-                                                                IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                                IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                                IntegerArgumentType.getInteger(ctx, "internal_time")));
+                                                            String.format("AUTO_BACKUP %d %d %d",
+                                                                    IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                                    IntegerArgumentType.getInteger(ctx, "world_index"),
+                                                                    IntegerArgumentType.getInteger(ctx, "internal_time")));
                                                 })
                                         )
                                 )
                         )
                 )
 
-                // 9. 停止远程自动备份
                 .then(Commands.literal("stop")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
                                         .executes(ctx -> {
                                             Config.clearAutoBackup();
                                             return executeRemoteCommand(ctx.getSource(),
-                                                String.format("STOP_AUTO_BACKUP %d %d",
-                                                        IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                        IntegerArgumentType.getInteger(ctx, "world_index")));
+                                                    String.format("STOP_AUTO_BACKUP %d %d",
+                                                            IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                            IntegerArgumentType.getInteger(ctx, "world_index")));
                                         })
                                 )
                         )
                 )
 
-                // 10. 与WorldEdit快照联动
                 .then(Commands.literal("snap")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
                                         .then(Commands.argument("backup_file", StringArgumentType.string())
-                                                .suggests((ctx, builder) -> suggestBackupFiles( // 复用备份文件自动补全
+                                                .suggests((ctx, builder) -> suggestBackupFiles(
                                                         IntegerArgumentType.getInteger(ctx, "config_id"),
                                                         IntegerArgumentType.getInteger(ctx, "world_index"),
                                                         builder))
                                                 .executes(ctx -> {
-                                                    // 构造发送给后端的命令
                                                     String command = String.format("ADD_TO_WE %d %d %s",
                                                             IntegerArgumentType.getInteger(ctx, "config_id"),
                                                             IntegerArgumentType.getInteger(ctx, "world_index"),
                                                             StringArgumentType.getString(ctx, "backup_file"));
-                                                    // 发送指令并处理响应
                                                     ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.snap.sent", command), false);
                                                     queryBackend(command, response -> handleGenericResponse(ctx.getSource(), response, "snap"));
                                                     return 1;
@@ -217,25 +200,75 @@ public class Command {
                         )
                 )
         );
+
+        dispatcher.register(Commands.literal("minebackup")
+                .requires(src -> {
+                    if (!src.getServer().isDedicatedServer()) return true;
+                    return src.hasPermission(2);
+                })
+                .executes(ctx -> {
+                    ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.command.migrated"), false);
+                    return 1;
+                })
+                .then(Commands.argument("args", StringArgumentType.greedyString())
+                        .executes(ctx -> {
+                            ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.command.migrated"), false);
+                            return 1;
+                        })
+                )
+        );
     }
 
-    // ----- 其余所有辅助方法都无需修改 -----
-
     private static void queryBackend(String command, java.util.function.Consumer<String> callback) {
-        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command).thenAccept(callback);
+        CompletableFuture<String> future = OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command);
+        if (future == null) {
+            try {
+                callback.accept(null);
+            } catch (Exception ignored) {}
+            return;
+        }
+        future
+                .exceptionally(ex -> {
+                    ex.printStackTrace();
+                    return "ERROR:COMMUNICATION_FAILED";
+                })
+                .thenAccept(resp -> {
+                    try {
+                        callback.accept(resp);
+                    } catch (Exception ignored) {}
+                });
     }
 
     private static void handleGenericResponse(CommandSourceStack source, String response, String commandType) {
         source.getServer().execute(() -> {
             if (response != null && response.startsWith("ERROR:")) {
-                source.sendFailure(Component.translatable("minebackup.message.command.fail", response.substring(6)));
+                source.sendFailure(Component.translatable("minebackup.message.command.fail", localizeErrorDetail(response)));
             } else {
                 source.sendSuccess(() -> Component.translatable("minebackup.message." + commandType + ".response", response), false);
             }
         });
     }
 
+    private static Object localizeErrorDetail(String response) {
+        if (response == null) {
+            return Component.translatable("minebackup.message.no_response");
+        }
+        if (response.startsWith("ERROR:")) {
+            String error = response.substring(6);
+            return switch (error) {
+                case "COMMUNICATION_FAILED" -> Component.translatable("minebackup.message.communication_failed");
+                case "NO_RESPONSE" -> Component.translatable("minebackup.message.no_response");
+                default -> error;
+            };
+        }
+        return response;
+    }
+
     private static int executeRemoteCommand(CommandSourceStack source, String command) {
+        if (command == null || command.trim().isEmpty()) {
+            source.sendFailure(Component.translatable("minebackup.message.command.invalid"));
+            return 0;
+        }
         source.sendSuccess(() -> Component.translatable("minebackup.message.command.sent", command), false);
         String commandType = command.split(" ")[0].toLowerCase();
         queryBackend(command, response -> handleGenericResponse(source, response, commandType));
@@ -245,7 +278,8 @@ public class Command {
     private static void handleListConfigsResponse(CommandSourceStack source, String response) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(Component.translatable("minebackup.message.list_configs.fail", response != null ? response : "无响应"));
+                Object errorDetail = localizeErrorDetail(response);
+                source.sendFailure(Component.translatable("minebackup.message.list_configs.fail", errorDetail));
                 return;
             }
             MutableComponent resultText = Component.translatable("minebackup.message.list_configs.success.title");
@@ -267,7 +301,8 @@ public class Command {
     private static void handleListWorldsResponse(CommandSourceStack source, String response, int configId) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(Component.translatable("minebackup.message.list_worlds.fail", response != null ? response : "无响应"));
+                Object errorDetail = localizeErrorDetail(response);
+                source.sendFailure(Component.translatable("minebackup.message.list_worlds.fail", errorDetail));
                 return;
             }
             MutableComponent resultText = Component.translatable("minebackup.message.list_worlds.success.title", String.valueOf(configId));
@@ -287,7 +322,8 @@ public class Command {
     private static void handleListBackupsResponse(CommandSourceStack source, String response, int configId, int worldIndex) {
         source.getServer().execute(() -> {
             if (response == null || !response.startsWith("OK:")) {
-                source.sendFailure(Component.translatable("minebackup.message.list_backups.fail", response != null ? response : "无响应"));
+                Object errorDetail = localizeErrorDetail(response);
+                source.sendFailure(Component.translatable("minebackup.message.list_backups.fail", errorDetail));
                 return;
             }
             MutableComponent resultText = Component.translatable("minebackup.message.list_backups.success.title", String.valueOf(configId), String.valueOf(worldIndex));
@@ -312,9 +348,11 @@ public class Command {
                     if (response != null && response.startsWith("OK:")) {
                         String data = response.substring(3);
                         String[] files = data.split(";");
+                        String remaining = builder.getRemaining();
+                        String remLower = remaining == null ? "" : remaining.toLowerCase(Locale.ROOT);
                         for (String file : files) {
-                            if (!file.isEmpty() && file.toLowerCase().startsWith(builder.getRemaining().toLowerCase())) {
-                                builder.suggest("'" + file + "'");
+                            if (!file.isEmpty() && file.toLowerCase(Locale.ROOT).startsWith(remLower)) {
+                                builder.suggest(file);
                             }
                         }
                     }

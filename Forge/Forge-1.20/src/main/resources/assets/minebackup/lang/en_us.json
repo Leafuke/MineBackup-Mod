@@ -2,6 +2,10 @@
   "minebackup.message.save.start": "§eExecuting local world save...",
   "minebackup.message.save.success": "§aLocal world save successful.",
 
+  "minebackup.message.remote_save.start": "§eExecuting remote save command...",
+  "minebackup.message.remote_save.success": "§aRemote save complete.",
+  "minebackup.message.remote_save.fail": "§cRemote save failed!",
+
   "minebackup.message.list_configs.start": "§eQuerying configurations from MineBackup...",
   "minebackup.message.list_configs.success.title": "§aAvailable Configurations:",
   "minebackup.message.list_configs.success.entry": "\n §7- §fID: §b%s§7, Name: §e%s",
@@ -22,11 +26,21 @@
 
   "minebackup.message.command.sent": "§eSending command to MineBackup: §f%s",
   "minebackup.message.command.fail": "§cCommand failed: §f%s",
+  "minebackup.message.command.invalid": "§cInvalid command.",
+  "minebackup.message.command.migrated": "§eCommand has migrated to /mb. Please use /mb.",
+  "minebackup.message.communication_failed": "Communication failed.",
+  "minebackup.message.no_response": "No response.",
+  "minebackup.message.unknown_world": "Unknown World",
+  "minebackup.message.unknown_file": "Unknown File",
+  "minebackup.message.unknown_error": "Unknown Error",
   "minebackup.message.backup.response": "§aMineBackup: §f%s",
   "minebackup.message.restore.response": "§aMineBackup: §f%s",
   "minebackup.message.snap.response": "§aMineBackup: §f%s",
   "minebackup.message.auto.response": "§aMineBackup: §f%s",
   "minebackup.message.stop.response": "§aMineBackup: §f%s",
+  "minebackup.message.auto_backup.response": "§aMineBackup: §f%s",
+  "minebackup.message.stop_auto_backup.response": "§aMineBackup: §f%s",
+  "minebackup.message.backup_current.response": "§aMineBackup: §f%s",
 
   "minebackup.message.snap.sent": "§eSending command to create WE snapshot: §f%s",
 
@@ -44,5 +58,8 @@
   "minebackup.message.restore.kick": "§6[MineBackup] §eRestoring world, you will be reconnected shortly...§r",
   "minebackup.message.restore.rejoining": "§a[MineBackup] §eRestore complete! Rejoining world...",
   "minebackup.message.restore.failed": "§c[MineBackup] §4Restore failed! Auto-rejoin has been cancelled.",
+  "minebackup.message.handshake.success": "§a[MineBackup] §eConnected to MineBackup main program §fv%s§e.",
+  "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4WARNING: Mod version §f%s §4is lower than the required minimum §f%s§4. Some features may not work correctly!",
+  "minebackup.message.handshake.main_version_incompatible": "§c[MineBackup] §4WARNING: Main program version §f%s §4is lower than the required minimum §f%s§4. Aborting connection to prevent potential issues!",
   "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §eWorldEdit snapshot for §f'%s' §acompleted successfully."
 }
