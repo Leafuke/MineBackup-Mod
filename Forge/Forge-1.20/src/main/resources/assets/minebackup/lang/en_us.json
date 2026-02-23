@@ -41,6 +41,7 @@
   "minebackup.message.auto_backup.response": "§aMineBackup: §f%s",
   "minebackup.message.stop_auto_backup.response": "§aMineBackup: §f%s",
   "minebackup.message.backup_current.response": "§aMineBackup: §f%s",
+  "minebackup.message.restore_current.response": "§aMineBackup: §f%s",
 
   "minebackup.message.snap.sent": "§eSending command to create WE snapshot: §f%s",
 
@@ -57,6 +58,7 @@
   "minebackup.message.restore.preparing": "§6[MineBackup] §eReceived hot restore request. Preparing world...",
   "minebackup.message.restore.kick": "§6[MineBackup] §eRestoring world, you will be reconnected shortly...§r",
   "minebackup.message.restore.rejoining": "§a[MineBackup] §eRestore complete! Rejoining world...",
+  "minebackup.message.restore.success_overlay": "§a[MineBackup] §eRestore successful!",
   "minebackup.message.restore.failed": "§c[MineBackup] §4Restore failed! Auto-rejoin has been cancelled.",
   "minebackup.message.handshake.success": "§a[MineBackup] §eConnected to MineBackup main program §fv%s§e.",
   "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4WARNING: Mod version §f%s §4is lower than the required minimum §f%s§4. Some features may not work correctly!",

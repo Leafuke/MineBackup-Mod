@@ -20,6 +20,10 @@ public class Command {
 
     private static final String QUERIER_APP_ID = "0x00000020";
     private static final String QUERIER_SOCKET_ID = "0x00000010";
+    private static final long CURRENT_BACKUPS_QUERY_INTERVAL_MS = 5000L;
+    private static volatile long lastCurrentBackupsQueryAtMs = 0L;
+    private static volatile String lastCurrentBackupsResponse = null;
+    private static CompletableFuture<String> currentBackupsQueryFuture = null;
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("mb")
@@ -142,6 +146,15 @@ public class Command {
                                 })
                         )
                 )
+
+                        .then(Commands.literal("quickrestore")
+                            .executes(ctx -> executeRemoteCommand(ctx.getSource(), "RESTORE_CURRENT_LATEST"))
+                            .then(Commands.argument("backup_file", StringArgumentType.string())
+                                .suggests((ctx, builder) -> suggestCurrentBackupFiles(builder))
+                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
+                                    String.format("RESTORE_CURRENT %s", StringArgumentType.getString(ctx, "backup_file"))))
+                            )
+                        )
 
                 .then(Commands.literal("auto")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
@@ -359,4 +372,64 @@ public class Command {
                     return builder.build();
                 });
     }
+
+    private static CompletableFuture<Suggestions> suggestCurrentBackupFiles(SuggestionsBuilder builder) {
+        return queryCurrentBackupsThrottled()
+                .thenApply(response -> {
+                    if (response != null && response.startsWith("OK:")) {
+                        String data = response.substring(3);
+                        String[] files = data.split(";");
+                        String remaining = builder.getRemaining();
+                        String normalized = remaining == null ? "" : remaining;
+                        if (!normalized.isEmpty() && (normalized.charAt(0) == '\'' || normalized.charAt(0) == '"')) {
+                            normalized = normalized.substring(1);
+                        }
+                        String remLower = normalized.toLowerCase(Locale.ROOT);
+                        for (String file : files) {
+                            if (!file.isEmpty() && file.toLowerCase(Locale.ROOT).startsWith(remLower)) {
+                                builder.suggest("'" + file.replace("'", "\\'") + "'");
+                            }
+                        }
+                    }
+                    return builder.build();
+                })
+                .exceptionally(ex -> {
+                    MineBackup.LOGGER.warn("获取当前世界备份补全失败: {}", ex.getMessage());
+                    return builder.build();
+                });
+    }
+
+    private static CompletableFuture<String> queryCurrentBackupsThrottled() {
+        synchronized (Command.class) {
+            long now = System.currentTimeMillis();
+            if (now - lastCurrentBackupsQueryAtMs < CURRENT_BACKUPS_QUERY_INTERVAL_MS) {
+                if (currentBackupsQueryFuture != null && !currentBackupsQueryFuture.isDone()) {
+                    return currentBackupsQueryFuture;
+                }
+                return CompletableFuture.completedFuture(lastCurrentBackupsResponse);
+            }
+
+            lastCurrentBackupsQueryAtMs = now;
+            CompletableFuture<String> future = OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "LIST_BACKUPS_CURRENT");
+            if (future == null) {
+                return CompletableFuture.completedFuture(lastCurrentBackupsResponse);
+            }
+
+            currentBackupsQueryFuture = future.handle((response, ex) -> {
+                synchronized (Command.class) {
+                    currentBackupsQueryFuture = null;
+                    if (ex == null && response != null && response.startsWith("OK:")) {
+                        lastCurrentBackupsResponse = response;
+                    }
+                }
+                if (ex != null) {
+                    MineBackup.LOGGER.warn("查询当前世界备份失败: {}", ex.getMessage());
+                    return lastCurrentBackupsResponse;
+                }
+                return response;
+            });
+            return currentBackupsQueryFuture;
+        }
+    }
+
 }

@@ -269,6 +269,21 @@ public class MineBackupClient implements ClientModInitializer {
         HotRestoreState.reset();
     }
 
+    public static void showRestoreSuccessOverlay() {
+        try {
+            Minecraft client = Minecraft.getInstance();
+            if (client == null) {
+                return;
+            }
+            client.execute(() -> {
+                if (client.player != null) {
+                    client.player.displayClientMessage(Component.translatable("minebackup.message.restore.success_overlay"), true);
+                }
+            });
+        } catch (Exception ignored) {
+        }
+    }
+
     /**
      * 规范化并校验世界目录名，避免出现 "." 等非法值导致读取 saves/. 失败。
      */

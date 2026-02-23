@@ -366,8 +366,8 @@ public class MineBackup {
             return;
         }
 
-        if ("restore_finished".equals(eventType)) {
-            String status = eventData.getOrDefault("status", "success");
+        if ("restore_finished".equals(eventType) || "restore_success".equals(eventType)) {
+            String status = "restore_success".equals(eventType) ? "success" : eventData.getOrDefault("status", "success");
             if ("success".equals(status)) {
                 String worldFromEvent = eventData.get("world");
                 if (isValidLevelId(worldFromEvent)) {
@@ -384,6 +384,7 @@ public class MineBackup {
                     MineBackupClient.worldToRejoin = HotRestoreState.levelIdToRejoin;
                 }
                 HotRestoreState.waitingForServerStopAck = false;
+                MineBackupClient.showRestoreSuccessOverlay();
                 LOGGER.info("还原成功，已标记客户端准备重新加入世界");
             } else {
                 LOGGER.warn("主程序报告还原失败，status={}", status);

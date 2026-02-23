@@ -41,6 +41,7 @@
   "minebackup.message.auto_backup.response": "§aMineBackup 响应: §f%s",
   "minebackup.message.stop_auto_backup.response": "§aMineBackup 响应: §f%s",
   "minebackup.message.backup_current.response": "§aMineBackup 响应: §f%s",
+  "minebackup.message.restore_current.response": "§aMineBackup 响应: §f%s",
 
   "minebackup.message.snap.sent": "§e发送指令以创建WE快照: §f%s",
 
@@ -57,6 +58,7 @@
   "minebackup.message.restore.preparing": "§6[MineBackup] §e收到热还原请求，正在准备世界...",
   "minebackup.message.restore.kick": "§6[MineBackup] §e正在为您还原存档，稍后将自动重连...§r",
   "minebackup.message.restore.rejoining": "§a[MineBackup] §e还原完成！正在重新加入世界...",
+  "minebackup.message.restore.success_overlay": "§a[MineBackup] §e还原成功！",
   "minebackup.message.restore.failed": "§c[MineBackup] §4还原失败！自动重连已取消。",
   "minebackup.message.handshake.success": "§a[MineBackup] §e已连接到 MineBackup 主程序 §fv%s§e。",
   "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4警告: 模组版本 §f%s §4低于主程序要求的最低版本 §f%s§4，部分功能可能无法正常工作！",

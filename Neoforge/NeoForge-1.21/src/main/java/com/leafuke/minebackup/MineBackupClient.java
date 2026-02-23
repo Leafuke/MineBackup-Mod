@@ -209,6 +209,21 @@ public class MineBackupClient {
         HotRestoreState.reset();
     }
 
+    public static void showRestoreSuccessOverlay() {
+        try {
+            Minecraft client = Minecraft.getInstance();
+            if (client == null) {
+                return;
+            }
+            client.execute(() -> {
+                if (client.player != null) {
+                    client.player.displayClientMessage(Component.translatable("minebackup.message.restore.success_overlay"), true);
+                }
+            });
+        } catch (Exception ignored) {
+        }
+    }
+
     private static String sanitizeLevelId(String rawLevelId) {
         if (rawLevelId == null) {
             return null;
