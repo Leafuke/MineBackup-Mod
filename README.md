@@ -12,9 +12,11 @@ Please note: This mod is a **companion component** for the **MineBackup desktop 
 
 Additionally, for proper inter-process communication, the KnotLink server must be installed on your computer. https://github.com/hxh230802/KnotLink/releases
 
+**Exception**：Linux/MacOS users do not need to install the KnotLink server.
+
 ### **➡️ [Download the REQUIRED MineBackup Desktop Application Here](https://github.com/Leafuke/MineBackup/releases)**
 
-or consider using **FolderRewind** with plugin [MineRewind](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases)
+For Windows Users, recommend **FolderRewind** with plugin [MineRewind](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases)
 
 <a href="https://apps.microsoft.com/detail/9nwsdgxdqws4?referrer=appbadge&mode=direct">
 	<img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200"/>
@@ -37,7 +39,7 @@ This lightweight Forge mod serves as a bridge between the powerful **MineBackup 
 1.  **Download the Main Application**: Ensure you have downloaded the `MineBackup.exe` desktop application from the link above and that it runs correctly on your system.
 2.  **Download This Mod**: Get the version-matched `minebackup-x.x.x.jar` file from the **[Releases](https://github.com/Leafuke/MineBackup/releases)** page or other mod distribution platforms.
 3.  **Install the Mod**: Place the downloaded `.jar` file into your Minecraft client's `mods` folder.
-4.  **Run Simultaneously**: Launch your Minecraft game or server. For the mod to function, you **must have the `MineBackup.exe` desktop application running in the background while playing**.
+4.  **Run Simultaneously**: Launch your Minecraft game or server. For the mod to function, you **must have the `MineBackup`/`FolderRewind` desktop application running in the background while playing**.
 
 For step 1 to 2, you can also consider using **FolderRewind** with plugin **MineRewind** as an alternative. As follows:
 1. Download and install **FolderRewind** from Microsoft Store.
@@ -56,10 +58,11 @@ All commands require operator (OP) permissions for multiplayer servers. But for 
 | **/mb list_worlds** | `<config_id>` | Lists all worlds under the specified configuration profile along with their indices. |
 | **/mb list_backups** | `<config_id> <world_index>` | Lists all available backup files for the specified world. |
 | **/mb backup** | `<config_id> <world_index> [comment]` | Instructs the main application to create a backup for the specified world. An optional comment can be added. |
-| **/mb restore** | `<config_id> <world_index> <filename>` | Instructs the main application to restore the world using the specified backup file. **This is a dangerous operation that will overwrite your current world!** |
+| **/mb restore** | `<config_id> <world_index> <filename>` | Instructs the main application to restore the world using the specified backup file. Want to restore the current world? Use **/mb quickrestore** instead. |
 | **/mb auto** | `<config_id> <world_index> <internal_time>` | Requests MineBackup to start an automatic backup task, backing up every `internal_time` minutes. |
 | **/mb stop** | `<config_id> <world_index>` | Requests MineBackup to stop the automatic backup task. |
-| **/mb quicksave** | (none) | Performs a backup for the current world. |
+| **/mb quicksave** | `[comment]` | Performs a backup for the current world. |
+| **/mb quickrestore** | `[filename]` | Performs a hot restore for the current world. If no filename is provided, it will automatically select the latest backup file. |
 
 ### **💡 Usage Example**
 
@@ -86,7 +89,7 @@ Let's say you want to create a backup for your server's main world:
 ## ❓ Frequently Asked Questions
 
 * **Q: When I use a command, the chat says "Command failed", "No response", or a similar error.**
-    * **A:** Please check and ensure the `MineBackup.exe` desktop application is running in the background on your computer. All features of this mod rely on network communication with the main application.
+    * **A:** Please check and ensure the `MineBackup`/`FolderRewind` desktop application is running in the background on your computer. All features of this mod rely on network communication with the main application.
 
 * **Q: Can this mod be used by itself?**
     * **A:** No. It is a "bridge" and cannot do anything without the main application.

@@ -9,10 +9,11 @@
 
 请注意：本模组是 **MineBackup 主程序**的联动组件，**无法独立运行**。您必须先下载并运行主程序，本模组才能正常工作。
 并且为了程序间正常的通信，电脑上需要存在 KnotLink 服务端。https://github.com/hxh230802/KnotLink/releases
+**例外**：Linux/MacOS 用户无需安装 KnotLink 服务端。
 
 ### **➡️ [点此下载必需的 MineBackup 主程序](https://github.com/Leafuke/MineBackup/releases)**
 
-或者，你可以使用 FolderRewind + [MineRewind](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases) 插件组合来实现类似的功能：
+对于Windows端用户，推荐使用 FolderRewind + [MineRewind](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases) 插件组合来实现同样的功能：
 
 <a href="https://apps.microsoft.com/detail/9nwsdgxdqws4?referrer=appbadge&mode=direct">
 	<img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200"/>
@@ -22,7 +23,7 @@
 
 ## 这是什么？
 
-这个轻量级的 Forge 模组是连接功能强大的 **MineBackup 桌面应用**与 **Minecraft 游戏本身**的桥梁。它让你可以在不离开游戏的情况下，享受到 MineBackup 带来的所有便利。
+这个轻量级的模组是连接功能强大的 **MineBackup 桌面应用**与 **Minecraft 游戏本身**的桥梁。它让你可以在不离开游戏的情况下，享受到 MineBackup 带来的所有便利。
 
 ### ✨ 本模组为您提供：
 
@@ -32,10 +33,10 @@
 
 ## 🚀 安装指南
 
-1.  **下载主程序**: 确保你已经从上方的链接下载了 `MineBackup.exe` 主程序，并且它可以在你的电脑上正常运行。
+1.  **下载主程序**: 确保你已经从上方的链接下载了 `MineBackup` 主程序，并且它可以在你的电脑上正常运行。
 2.  **下载本模组**: 从 **[Releases](https://github.com/Leafuke/MineBackup/releases)** 或其他模组下载页面找到与主程序版本匹配的 `minebackup-x.x.x.jar` 文件。
 3.  **安装模组**: 将下载的 `.jar` 文件放入你的 Minecraft 客户端的 `mods` 文件夹中。
-4.  **同时运行**: 启动你的 Minecraft 游戏或服务器。为了让模组正常工作，请务必**在玩游戏的同时，让 `MineBackup.exe` 主程序在后台运行**。
+4.  **同时运行**: 启动你的 Minecraft 游戏或服务器。为了让模组正常工作，请务必**在玩游戏的同时，让 `MineBackup`/`FolderRewind` 主程序在后台运行**。
 
 对于步骤1-2，你可以下载 FolderRewind + MineRewind 插件来替代。
 
@@ -50,10 +51,11 @@
 | **/mb list_worlds** | `<config_id>` | 列出指定配置下的所有世界及其索引号（index）。 |
 | **/mb list_backups** | `<config_id> <world_index>` | 列出指定世界的所有可用备份文件。 |
 | **/mb backup** | `<config_id> <world_index> [注释]` | 命令主程序为指定世界创建一次备份。可以附上一段可选的注释。 |
-| **/mb restore** | `<config_id> <world_index> <文件名>` | 命令主程序用指定的备份文件来还原世界。**这是一个危险操作，会覆盖你当前的世界！** |
+| **/mb restore** | `<config_id> <world_index> <文件名>` | 命令主程序用指定的备份文件来还原世界。如果你希望还原当前世界，务必使用 **/mb quickrestore** |
 | **/mb auto** | `<config_id> <world_index> <internal_time>` | 请求 MineBackup 执行自动备份任务，间隔 internal_time 分钟进行自动备份 |
 | **/mb stop** | `<config_id> <world_index>` | 请求 MineBackup 停止自动备份任务 |
-| **/mb quicksave** | (无) | 为当前世界执行备份 |
+| **/mb quicksave** | `[注释]` | 为当前世界执行备份 |
+| **/mb quickrestore** | `[文件名]` | 为当前世界执行热还原，不填写文件名则自动选择最新的备份文件 |
 
 ### **💡 使用示例**
 
@@ -80,7 +82,7 @@
 ## ❓ 常见问题
 
 * **问题：我输入指令后，聊天框提示“指令失败”、“无响应”或类似的错误。**
-    * **答案：** 请检查并确保 `MineBackup.exe` 主程序正在你的电脑后台运行。本模组的所有功能都依赖于和主程序的网络通信。
+    * **答案：** 请检查并确保 `MineBackup`/`FolderRewind` 主程序正在你的电脑后台运行。本模组的所有功能都依赖于和主程序的网络通信。
 
 * **问题：这个模组可以单独使用吗？**
     * **答案：** 不可以。它是一个“桥梁”，没有主程序，它什么也做不了。
