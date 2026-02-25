@@ -198,6 +198,35 @@ public class Command {
                                 )
                         )
                 )
+
+                .then(net.minecraft.server.command.CommandManager.literal("freeze")
+                        .executes(ctx -> {
+                            ServerCommandSource source = ctx.getSource();
+                            MinecraftServer server = source.getServer();
+                            if (MineBackup.isSaveFrozen()) {
+                                source.sendError(Text.translatable("minebackup.message.freeze.already"));
+                                return 0;
+                            }
+                            // 先保存再冻结
+                            saveAllWorlds(source);
+                            MineBackup.freezeAutoSave(server);
+                            source.sendFeedback(() -> Text.translatable("minebackup.message.freeze.success"), true);
+                            return 1;
+                        })
+                )
+                .then(net.minecraft.server.command.CommandManager.literal("unfreeze")
+                        .executes(ctx -> {
+                            ServerCommandSource source = ctx.getSource();
+                            MinecraftServer server = source.getServer();
+                            if (!MineBackup.isSaveFrozen()) {
+                                source.sendError(Text.translatable("minebackup.message.unfreeze.already"));
+                                return 0;
+                            }
+                            MineBackup.unfreezeAutoSave(server);
+                            source.sendFeedback(() -> Text.translatable("minebackup.message.unfreeze.success"), true);
+                            return 1;
+                        })
+                )
         );
 
         // 旧命令入口：提示已迁移到 /mb

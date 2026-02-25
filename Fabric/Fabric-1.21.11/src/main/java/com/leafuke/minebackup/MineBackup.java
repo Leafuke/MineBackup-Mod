@@ -16,8 +16,12 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+
+import net.minecraft.server.level.ServerLevel;
 
 /**
  * MineBackup Mod 主入口类（Fabric 1.21.11+，使用 Mojang 官方映射）
@@ -34,6 +38,12 @@ public class MineBackup implements ModInitializer {
     private static SignalSubscriber knotLinkSubscriber = null;
     // 服务器实例（使用 volatile 保证线程安全）
     private static volatile MinecraftServer serverInstance;
+
+    // 自动保存冻结状态
+    private static volatile boolean saveFrozen = false;
+    private static final List<ServerLevel> frozenWorlds = new ArrayList<>();
+    private static volatile long freezeTimestamp = 0;
+    private static final long FREEZE_TIMEOUT_MS = 3 * 60 * 1000L;  // 3min
 
     // KnotLink 通信 ID
     public static final String BROADCAST_APP_ID = "0x00000020";
@@ -90,6 +100,11 @@ public class MineBackup implements ModInitializer {
 
         // 服务器停止事件
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            if (saveFrozen) {
+                LOGGER.warn("[Safety] Server stopping while auto-save is frozen! Unfreezing now.");
+                unfreezeAutoSave(server);
+            }
+
             // 仅在专用服务器上停止订阅器
             if (server.isDedicatedServer()) {
                 if (knotLinkSubscriber != null) {
@@ -283,6 +298,7 @@ public class MineBackup implements ModInitializer {
      */
     private void handleBroadcastEvent(String payload) {
         if (serverInstance == null) return;
+        checkFreezeTimeout();
 
         // 处理远程保存命令
         if ("minebackup save".equals(payload)) {
@@ -537,7 +553,9 @@ public class MineBackup implements ModInitializer {
                     serverInstance.getPlayerList().broadcastSystemMessage(
                         Component.translatable("minebackup.broadcast.hot_backup.warn", worldName), false);
                 }
-                LOGGER.info("[MineBackup] 世界数据保存完成");
+                freezeAutoSave(serverInstance);
+
+                LOGGER.info("[MineBackup] World saved and auto-save frozen for hot backup.");
                 serverInstance.getPlayerList().broadcastSystemMessage(
                     Component.translatable("minebackup.broadcast.hot_backup.complete"), false);
                 // KnotLink 新协议：通知主程序世界保存已完成
@@ -548,10 +566,81 @@ public class MineBackup implements ModInitializer {
             LOGGER.info("[MineBackup] 检测到游戏会话开始，世界: {}", getWorldDisplay(eventData).getString());
         }
 
+        // 备份完成后恢复自动保存
+        if ("backup_success".equals(eventType) || "backup_failed".equals(eventType)) {
+            if (saveFrozen) {
+                serverInstance.execute(() -> {
+                    unfreezeAutoSave(serverInstance);
+                    LOGGER.info("Backup finished (event={}), auto-save unfrozen.", eventType);
+                    serverInstance.getPlayerList().broadcastSystemMessage(
+                            Component.translatable("minebackup.broadcast.autosave.resumed"), false);
+                });
+            }
+        }
+
         // 广播消息给所有玩家
         if (message != null) {
             serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(message, false));
         }
+    }
+
+    public static void freezeAutoSave(MinecraftServer server) {
+        if (saveFrozen) {
+            LOGGER.warn("[Freeze] Auto-save already frozen, skipping.");
+            return;
+        }
+        synchronized (frozenWorlds) {
+            frozenWorlds.clear();
+            for (ServerLevel level : server.getAllLevels()) {
+                if (level != null && !level.noSave) {
+                    level.noSave = true;
+                    frozenWorlds.add(level);
+                    LOGGER.info("[Freeze] Disabled auto-save for dimension: {}",
+                            level.dimension());
+                }
+            }
+        }
+        saveFrozen = true;
+        freezeTimestamp = System.currentTimeMillis();
+        LOGGER.info("[Freeze] Auto-save frozen for {} dimensions.", frozenWorlds.size());
+    }
+
+    public static void unfreezeAutoSave(MinecraftServer server) {
+        if (!saveFrozen) {
+            LOGGER.warn("[Unfreeze] Auto-save not frozen, skipping.");
+            return;
+        }
+        synchronized (frozenWorlds) {
+            for (ServerLevel level : frozenWorlds) {
+                if (level != null && level.noSave) {
+                    level.noSave = false;
+                    LOGGER.info("[Unfreeze] Re-enabled auto-save for dimension: {}",
+                            level.dimension());
+                }
+            }
+            frozenWorlds.clear();
+        }
+        saveFrozen = false;
+        freezeTimestamp = 0;
+        LOGGER.info("[Unfreeze] Auto-save unfrozen.");
+    }
+
+    private void checkFreezeTimeout() {
+        if (saveFrozen && freezeTimestamp > 0) {
+            long elapsed = System.currentTimeMillis() - freezeTimestamp;
+            if (elapsed > FREEZE_TIMEOUT_MS) {
+                LOGGER.error("[Safety] Auto-save freeze timed out after {}ms! Force unfreezing.", elapsed);
+                if (serverInstance != null) {
+                    unfreezeAutoSave(serverInstance);
+                    serverInstance.getPlayerList().broadcastSystemMessage(
+                            Component.translatable("minebackup.broadcast.autosave.timeout"), false);
+                }
+            }
+        }
+    }
+
+    public static boolean isSaveFrozen() {
+        return saveFrozen;
     }
 
     /**

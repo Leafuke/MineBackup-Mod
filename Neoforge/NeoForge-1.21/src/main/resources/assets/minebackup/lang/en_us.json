@@ -63,5 +63,11 @@
   "minebackup.message.handshake.success": "§a[MineBackup] §eConnected to MineBackup main program §fv%s§e.",
   "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4WARNING: Mod version §f%s §4is lower than the required minimum §f%s§4. Some features may not work correctly!",
   "minebackup.message.handshake.main_version_incompatible": "§c[MineBackup] §4WARNING: Main program version §f%s §4is lower than the required minimum §f%s§4. Aborting connection to prevent potential issues!",
-  "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §eWorldEdit snapshot for §f'%s' §acompleted successfully."
+  "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §eWorldEdit snapshot for §f'%s' §acompleted successfully.",
+  "minebackup.broadcast.autosave.resumed": "§a[MineBackup] §2Backup complete. Auto-save resumed.",
+  "minebackup.broadcast.autosave.timeout": "§c[MineBackup] §4WARNING: Auto-save freeze timed out! Auto-save has been restored. Main program may not have responded.",
+  "minebackup.message.freeze.success": "§aSaved and froze auto-save. You can now backup save files with external tools.",
+  "minebackup.message.freeze.already": "§eAuto-save is already frozen.",
+  "minebackup.message.unfreeze.success": "§aAuto-save resumed.",
+  "minebackup.message.unfreeze.already": "§eAuto-save is not frozen."
 }

@@ -63,6 +63,11 @@
   "minebackup.message.handshake.success": "§a[MineBackup] §e已连接到 MineBackup 主程序 §fv%s§e。",
   "minebackup.message.handshake.version_incompatible": "§c[MineBackup] §4警告: 模组版本 §f%s §4低于主程序要求的最低版本 §f%s§4，部分功能可能无法正常工作！",
   "minebackup.message.handshake.main_version_incompatible": "§c[MineBackup] §4警告: 主程序版本 §f%s §4低于模组要求的最低版本 §f%s§4。正在停止...",
-  "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §f'%s' §a的快照已成功创建并被WE识别。"
-
+  "minebackup.broadcast.we_snapshot.completed": "§a[MineBackup] §f'%s' §a的快照已成功创建并被WE识别。",
+  "minebackup.broadcast.autosave.resumed": "§a[MineBackup] §2备份已完成，自动保存已恢复。",
+  "minebackup.broadcast.autosave.timeout": "§c[MineBackup] §4警告：自动保存冻结已超时，已自动恢复自动保存。主程序可能未正常响应。",
+  "minebackup.message.freeze.success": "§a已保存并冻结自动保存。现在可以用外部程序备份存档文件。",
+  "minebackup.message.freeze.already": "§e自动保存已经处于冻结状态。",
+  "minebackup.message.unfreeze.success": "§a自动保存已恢复。",
+  "minebackup.message.unfreeze.already": "§e自动保存未被冻结，无需解冻。"
 }
