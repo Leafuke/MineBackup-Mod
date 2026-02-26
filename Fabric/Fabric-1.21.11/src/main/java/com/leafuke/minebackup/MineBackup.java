@@ -480,13 +480,13 @@ public class MineBackup implements ModInitializer {
                         MineBackupClient.worldToRejoin = fallbackLevelId;
                     }
                 }
-                MineBackupClient.readyToRejoin = true;
+                MineBackupClient.readyToRejoin = false;
                 if (HotRestoreState.levelIdToRejoin != null && MineBackupClient.worldToRejoin == null) {
                     MineBackupClient.worldToRejoin = HotRestoreState.levelIdToRejoin;
                 }
                 HotRestoreState.waitingForServerStopAck = false;
                 MineBackupClient.showRestoreSuccessOverlay();
-                LOGGER.info("[MineBackup] 还原成功，已标记客户端准备重新加入世界");
+                LOGGER.info("[MineBackup] 还原成功，等待 rejoin_world 事件后再执行重连");
             } else {
                 LOGGER.warn("[MineBackup] 主程序报告还原失败，status={}", status);
                 MineBackupClient.readyToRejoin = false;
@@ -511,8 +511,13 @@ public class MineBackup implements ModInitializer {
             if (HotRestoreState.levelIdToRejoin != null && MineBackupClient.worldToRejoin == null) {
                 MineBackupClient.worldToRejoin = HotRestoreState.levelIdToRejoin;
             }
-            if (!MineBackupClient.readyToRejoin && MineBackupClient.worldToRejoin != null) {
-                MineBackupClient.readyToRejoin = true;
+            if (!MineBackupClient.readyToRejoin) {
+                if (isValidLevelId(MineBackupClient.worldToRejoin)) {
+                    MineBackupClient.readyToRejoin = true;
+                } else {
+                    LOGGER.warn("[MineBackup] rejoin_world 事件缺少有效 world，发送 REJOIN_RESULT failure invalid_level_id");
+                    OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure invalid_level_id");
+                }
             }
             HotRestoreState.waitingForServerStopAck = false;
             return;
