@@ -26,7 +26,7 @@ public class MineBackup implements ModInitializer {
 
     public static final String MOD_ID = "minebackup";
     // KnotLink 协议版本号，用于与主程序握手时进行版本兼容性检查
-    public static final String MOD_VERSION = "1.0.0";
+    public static final String MOD_VERSION = "1.1.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     // --- From your existing code ---

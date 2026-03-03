@@ -32,7 +32,7 @@ import net.minecraft.server.level.ServerLevel;
 public class MineBackup {
 
     public static final String MOD_ID = "minebackup";
-    public static final String MOD_VERSION = "1.0.0";
+    public static final String MOD_VERSION = "1.1.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     private static SignalSubscriber knotLinkSubscriber = null;
