@@ -29,7 +29,7 @@ import net.minecraft.server.level.ServerLevel;
 public class MineBackup {
 
     public static final String MOD_ID = "minebackup";
-    public static final String MOD_VERSION = "1.1.0";
+    public static final String MOD_VERSION = "1.1.1";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     private static SignalSubscriber knotLinkSubscriber = null;
@@ -188,6 +188,9 @@ public class MineBackup {
         if (server == null) {
             return false;
         }
+        if (!savePlayerDataForHotBackup(server)) {
+            LOGGER.warn("Failed to explicitly save player data before hot backup. Continuing with world save.");
+        }
         Boolean byEverything = invokeServerSaveMethod(server, "saveEverything");
         if (byEverything != null) {
             return byEverything;
@@ -197,7 +200,66 @@ public class MineBackup {
             return bySave;
         }
         Boolean byChunks = invokeServerSaveMethod(server, "saveAllChunks");
-        return byChunks != null && byChunks;
+        if (byChunks != null) {
+            return byChunks;
+        }
+        Boolean byAll = invokeServerSaveMethod(server, "saveAll");
+        if (byAll != null) {
+            return byAll;
+        }
+        LOGGER.warn("No full world-save method was available for hot backup.");
+        return false;
+    }
+
+    private boolean savePlayerDataForHotBackup(MinecraftServer server) {
+        Object playerSaveHandler = resolvePlayerSaveHandler(server);
+        if (playerSaveHandler == null) {
+            return false;
+        }
+        Boolean bySaveAllPlayerData = invokeNoArgMethod(playerSaveHandler, "saveAllPlayerData", "player data save");
+        if (bySaveAllPlayerData != null) {
+            return bySaveAllPlayerData;
+        }
+        Boolean bySaveAll = invokeNoArgMethod(playerSaveHandler, "saveAll", "player data save");
+        if (bySaveAll != null) {
+            return bySaveAll;
+        }
+        return false;
+    }
+
+    private Object resolvePlayerSaveHandler(MinecraftServer server) {
+        Object playerList = invokeNoArgGetter(server, "getPlayerList");
+        if (playerList != null) {
+            return playerList;
+        }
+        return invokeNoArgGetter(server, "getPlayerManager");
+    }
+
+    private Object invokeNoArgGetter(Object target, String methodName) {
+        try {
+            return target.getClass().getMethod(methodName).invoke(target);
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to invoke {} while preparing hot backup: {}", methodName, t.getMessage());
+            return null;
+        }
+    }
+
+    private Boolean invokeNoArgMethod(Object target, String methodName, String actionName) {
+        try {
+            java.lang.reflect.Method method = target.getClass().getMethod(methodName);
+            Object result = method.invoke(target);
+            if (method.getReturnType() == boolean.class || method.getReturnType() == Boolean.class) {
+                return Boolean.TRUE.equals(result);
+            }
+            return true;
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to invoke {} for {}: {}", methodName, actionName, t.getMessage());
+            return false;
+        }
     }
 
     private Boolean invokeServerSaveMethod(MinecraftServer server, String methodName) {
@@ -251,7 +313,7 @@ public class MineBackup {
             serverInstance.execute(() -> {
                 LOGGER.info("Received 'minebackup save' command, executing immediate world save.");
                 serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.message.remote_save.start"), false);
-                boolean allLevelsSaved = serverInstance.saveAllChunks(true, true, true);
+                boolean allLevelsSaved = saveAllDataForHotBackup(serverInstance);
                 if (allLevelsSaved) {
                     serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.message.remote_save.success"), false);
                 } else {
@@ -469,11 +531,10 @@ public class MineBackup {
                     LOGGER.warn("One or more levels failed to save during pre_hot_backup for world: {}", worldName);
                     serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.warn", worldName), false);
                 }
-                LOGGER.info("World saved successfully for hot backup.");
-                serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.complete"), false);
-
-                // 保存完成后冻结自动保存
                 freezeAutoSave();
+
+                LOGGER.info("World save phase finished and auto-save frozen for hot backup.");
+                serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.complete"), false);
 
                 OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVED");
                 LOGGER.info("Sent WORLD_SAVED notification to MineBackup main program.");

@@ -26,7 +26,7 @@ public class MineBackup implements ModInitializer {
 
     public static final String MOD_ID = "minebackup";
     // KnotLink 协议版本号，用于与主程序握手时进行版本兼容性检查
-    public static final String MOD_VERSION = "1.1.0";
+    public static final String MOD_VERSION = "1.1.1";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     // --- From your existing code ---
@@ -234,33 +234,84 @@ public class MineBackup implements ModInitializer {
     }
 
     /**
-     * 热备份前执行“完整保存”。
-     *
-     * Yarn 1.21 中可用的是 MinecraftServer.save(boolean, boolean, boolean)，
-     * 对应 Mojang 映射的 saveEverything。优先直接调用 save，
-     * 仅在完全找不到时回退到反射尝试其他方法名。
-     *
-     * 参数含义：save(suppressLogs, flush, force)
-     * - suppressLogs = true  → 不在日志中输出“Saving the game”
-     * - flush = true         → 强制刷盘
-     * - force = true         → 强制保存（即使没有变化）
+     * 热备份前执行一次完整保存：先落玩家数据，再强制保存区块与 level.dat，最后才冻结自动保存。
      */
     private boolean saveAllDataForHotBackup(MinecraftServer server) {
         if (server == null) {
             return false;
         }
-        // Yarn 1.21: MinecraftServer.save(boolean, boolean, boolean) 是正确的方法名
+        if (!savePlayerDataForHotBackup(server)) {
+            LOGGER.warn("Failed to explicitly save player data before hot backup. Continuing with world save.");
+        }
         Boolean bySave = invokeServerSaveMethod(server, "save");
         if (bySave != null) {
             return bySave;
         }
-        // 回退：其他映射可能的方法名
         Boolean byEverything = invokeServerSaveMethod(server, "saveEverything");
         if (byEverything != null) {
             return byEverything;
         }
         Boolean byChunks = invokeServerSaveMethod(server, "saveAllChunks");
-        return byChunks != null && byChunks;
+        if (byChunks != null) {
+            return byChunks;
+        }
+        Boolean byAll = invokeServerSaveMethod(server, "saveAll");
+        if (byAll != null) {
+            return byAll;
+        }
+        LOGGER.warn("No full world-save method was available for hot backup.");
+        return false;
+    }
+
+    private boolean savePlayerDataForHotBackup(MinecraftServer server) {
+        Object playerSaveHandler = resolvePlayerSaveHandler(server);
+        if (playerSaveHandler == null) {
+            return false;
+        }
+        Boolean bySaveAllPlayerData = invokeNoArgMethod(playerSaveHandler, "saveAllPlayerData", "player data save");
+        if (bySaveAllPlayerData != null) {
+            return bySaveAllPlayerData;
+        }
+        Boolean bySaveAll = invokeNoArgMethod(playerSaveHandler, "saveAll", "player data save");
+        if (bySaveAll != null) {
+            return bySaveAll;
+        }
+        return false;
+    }
+
+    private Object resolvePlayerSaveHandler(MinecraftServer server) {
+        Object playerList = invokeNoArgGetter(server, "getPlayerList");
+        if (playerList != null) {
+            return playerList;
+        }
+        return invokeNoArgGetter(server, "getPlayerManager");
+    }
+
+    private Object invokeNoArgGetter(Object target, String methodName) {
+        try {
+            return target.getClass().getMethod(methodName).invoke(target);
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to invoke {} while preparing hot backup: {}", methodName, t.getMessage());
+            return null;
+        }
+    }
+
+    private Boolean invokeNoArgMethod(Object target, String methodName, String actionName) {
+        try {
+            java.lang.reflect.Method method = target.getClass().getMethod(methodName);
+            Object result = method.invoke(target);
+            if (method.getReturnType() == boolean.class || method.getReturnType() == Boolean.class) {
+                return Boolean.TRUE.equals(result);
+            }
+            return true;
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to invoke {} for {}: {}", methodName, actionName, t.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -276,27 +327,12 @@ public class MineBackup implements ModInitializer {
             if (method.getReturnType() == boolean.class || method.getReturnType() == Boolean.class) {
                 return Boolean.TRUE.equals(result);
             }
-            // 某些版本可能返回 void，调用成功即视为成功
             return true;
         } catch (NoSuchMethodException ignored) {
             return null;
         } catch (Throwable t) {
             LOGGER.warn("调用 {} 进行完整保存时失败: {}", methodName, t.getMessage());
             return null;
-        }
-    }
-
-    // Reflection-based invocation to avoid compile-time dependency on GcaCompat in environments where analysis fails
-    private static void trySaveGcaFakePlayers(MinecraftServer server) {
-        if (server == null) return;
-        try {
-            Class<?> clazz = Class.forName("com.leafuke.minebackup.compat.GcaCompat");
-            java.lang.reflect.Method m = clazz.getMethod("saveFakePlayersIfNeeded", MinecraftServer.class);
-            m.invoke(null, server);
-        } catch (ClassNotFoundException ignored) {
-            // GcaCompat not present on classpath - nothing to do
-        } catch (Throwable t) {
-            LOGGER.warn("Failed to invoke GcaCompat.saveFakePlayersIfNeeded: {}", t.getMessage());
         }
     }
 
@@ -310,7 +346,7 @@ public class MineBackup implements ModInitializer {
             serverInstance.execute(() -> {
                 LOGGER.info("Received 'minebackup save' command, executing immediate world save.");
                 serverInstance.getPlayerManager().broadcast(Text.translatable("minebackup.message.remote_save.start"), false);
-                boolean allLevelsSaved = serverInstance.save(true, true, true);
+                boolean allLevelsSaved = saveAllDataForHotBackup(serverInstance);
                 if (allLevelsSaved) {
                     serverInstance.getPlayerManager().broadcast(Text.translatable("minebackup.message.remote_save.success"), false);
                 } else {
@@ -540,8 +576,6 @@ public class MineBackup implements ModInitializer {
         if ("pre_hot_backup".equals(eventType)) {
             serverInstance.execute(() -> {
                 LOGGER.info("Executing immediate save for pre_hot_backup event.");
-                // 在热备份前触发 GCA 假人保存（如果存在）
-                trySaveGcaFakePlayers(serverInstance);
                 String worldName = serverInstance.getSaveProperties().getLevelName();
                 serverInstance.getPlayerManager().broadcast(Text.translatable("minebackup.broadcast.hot_backup.request", worldName), false);
                 // 使用“完整保存”路径，确保 level.dat 与区块文件同步落盘
