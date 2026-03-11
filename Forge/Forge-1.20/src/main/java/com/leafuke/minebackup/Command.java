@@ -28,19 +28,16 @@ public class Command {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("mb")
                 .requires(src -> {
-                    if (!src.getServer().isDedicatedServer()) return true;
+                    MinecraftServer server = src.getServer();
+                    if (server == null) return false;
+                    if (!server.isDedicatedServer()) return true;
                     return src.hasPermission(2);
                 })
 
                 .then(Commands.literal("save")
                         .executes(ctx -> {
                             CommandSourceStack source = ctx.getSource();
-                            MinecraftServer server = source.getServer();
-                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
-                            for (ServerLevel level : server.getAllLevels()) {
-                                level.save(null, true, false);
-                            }
-                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
+                            saveAllWorlds(source);
                             return 1;
                         })
                 )
@@ -121,29 +118,10 @@ public class Command {
                 )
 
                 .then(Commands.literal("quicksave")
-                        .executes(ctx -> {
-                            CommandSourceStack source = ctx.getSource();
-                            MinecraftServer server = source.getServer();
-                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
-                            for (ServerLevel level : server.getAllLevels()) {
-                                level.save(null, true, false);
-                            }
-                            source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
-                            return executeRemoteCommand(source, "BACKUP_CURRENT");
-                        })
+                    .executes(ctx -> executeRemoteCommand(ctx.getSource(), "BACKUP_CURRENT"))
                         .then(Commands.argument("comment", StringArgumentType.greedyString())
-                                .executes(ctx -> {
-                                    CommandSourceStack source = ctx.getSource();
-                                    MinecraftServer server = source.getServer();
-                                    source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
-                                    for (ServerLevel level : server.getAllLevels()) {
-                                        level.save(null, true, false);
-                                    }
-                                    source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
-                                    return executeRemoteCommand(ctx.getSource(),
-                                            String.format("BACKUP_CURRENT %s",
-                                                    StringArgumentType.getString(ctx, "comment")));
-                                })
+                        .executes(ctx -> executeRemoteCommand(ctx.getSource(),
+                            String.format("BACKUP_CURRENT %s", StringArgumentType.getString(ctx, "comment"))))
                         )
                 )
 
@@ -243,7 +221,9 @@ public class Command {
 
         dispatcher.register(Commands.literal("minebackup")
                 .requires(src -> {
-                    if (!src.getServer().isDedicatedServer()) return true;
+                    MinecraftServer server = src.getServer();
+                    if (server == null) return false;
+                    if (!server.isDedicatedServer()) return true;
                     return src.hasPermission(2);
                 })
                 .executes(ctx -> {
@@ -269,7 +249,7 @@ public class Command {
         }
         future
                 .exceptionally(ex -> {
-                    ex.printStackTrace();
+                    MineBackup.LOGGER.error("与 MineBackup 主程序通信异常: {}", ex.getMessage());
                     return "ERROR:COMMUNICATION_FAILED";
                 })
                 .thenAccept(resp -> {
@@ -281,19 +261,25 @@ public class Command {
 
     private static void saveAllWorlds(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
-        source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), true);
+        source.sendSuccess(() -> Component.translatable("minebackup.message.save.start"), false);
         for (ServerLevel level : server.getAllLevels()) {
             level.save(null, true, false);
         }
-        source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), true);
+        source.sendSuccess(() -> Component.translatable("minebackup.message.save.success"), false);
     }
 
     private static void handleGenericResponse(CommandSourceStack source, String response, String commandType) {
         source.getServer().execute(() -> {
-            if (response != null && response.startsWith("ERROR:")) {
+            if (response == null || response.isBlank()) {
+                source.sendFailure(Component.translatable("minebackup.message.command.fail",
+                        Component.translatable("minebackup.message.no_response")));
+            } else if (response.startsWith("ERROR:")) {
                 source.sendFailure(Component.translatable("minebackup.message.command.fail", localizeErrorDetail(response)));
             } else {
-                source.sendSuccess(() -> Component.translatable("minebackup.message." + commandType + ".response", response), false);
+                String detail = extractSuccessDetail(response);
+                if (detail != null) {
+                    source.sendSuccess(() -> Component.translatable("minebackup.message." + commandType + ".response", detail), false);
+                }
             }
         });
     }
@@ -319,9 +305,40 @@ public class Command {
             return 0;
         }
         source.sendSuccess(() -> Component.translatable("minebackup.message.command.sent", command), false);
-        String commandType = command.split(" ")[0].toLowerCase();
+        String commandType = normalizeCommandType(command.split(" ")[0].toLowerCase(Locale.ROOT));
         queryBackend(command, response -> handleGenericResponse(source, response, commandType));
         return 1;
+    }
+
+    private static String normalizeCommandType(String commandType) {
+        return "restore_current_latest".equals(commandType) ? "restore_current" : commandType;
+    }
+
+    private static String extractSuccessDetail(String response) {
+        String normalized = response == null ? "" : response.trim();
+        if (normalized.isEmpty() || "OK".equalsIgnoreCase(normalized)) {
+            return null;
+        }
+        if (normalized.regionMatches(true, 0, "OK:", 0, 3)) {
+            String detail = normalized.substring(3).trim();
+            return detail.isEmpty() ? null : detail;
+        }
+        return normalized;
+    }
+
+    private static String normalizeSuggestionInput(String remaining) {
+        String normalized = remaining == null ? "" : remaining;
+        if (!normalized.isEmpty() && (normalized.charAt(0) == '\'' || normalized.charAt(0) == '"')) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
+    }
+
+    private static String quoteSuggestion(String value) {
+        if (value.indexOf(' ') < 0 && value.indexOf('"') < 0 && value.indexOf('\'') < 0) {
+            return value;
+        }
+        return "'" + value.replace("'", "\\'") + "'";
     }
 
     private static void handleListConfigsResponse(CommandSourceStack source, String response) {
@@ -397,14 +414,17 @@ public class Command {
                     if (response != null && response.startsWith("OK:")) {
                         String data = response.substring(3);
                         String[] files = data.split(";");
-                        String remaining = builder.getRemaining();
-                        String remLower = remaining == null ? "" : remaining.toLowerCase(Locale.ROOT);
+                        String remLower = normalizeSuggestionInput(builder.getRemaining()).toLowerCase(Locale.ROOT);
                         for (String file : files) {
                             if (!file.isEmpty() && file.toLowerCase(Locale.ROOT).startsWith(remLower)) {
-                                builder.suggest(file);
+                                builder.suggest(quoteSuggestion(file));
                             }
                         }
                     }
+                    return builder.build();
+                })
+                .exceptionally(ex -> {
+                    MineBackup.LOGGER.warn("获取备份文件补全失败: {}", ex.getMessage());
                     return builder.build();
                 });
     }
@@ -415,15 +435,10 @@ public class Command {
                     if (response != null && response.startsWith("OK:")) {
                         String data = response.substring(3);
                         String[] files = data.split(";");
-                        String remaining = builder.getRemaining();
-                        String normalized = remaining == null ? "" : remaining;
-                        if (!normalized.isEmpty() && (normalized.charAt(0) == '\'' || normalized.charAt(0) == '"')) {
-                            normalized = normalized.substring(1);
-                        }
-                        String remLower = normalized.toLowerCase(Locale.ROOT);
+                        String remLower = normalizeSuggestionInput(builder.getRemaining()).toLowerCase(Locale.ROOT);
                         for (String file : files) {
                             if (!file.isEmpty() && file.toLowerCase(Locale.ROOT).startsWith(remLower)) {
-                                builder.suggest("'" + file.replace("'", "\\'") + "'");
+                                builder.suggest(quoteSuggestion(file));
                             }
                         }
                     }

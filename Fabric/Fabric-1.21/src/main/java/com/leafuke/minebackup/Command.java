@@ -124,13 +124,10 @@ public class Command {
                 )
                 .then(net.minecraft.server.command.CommandManager.literal("quicksave")
                         .executes(ctx -> {
-                            // 先执行本地保存，再请求后端进行当前世界备份。
-                            saveAllWorlds(ctx.getSource());
                             return executeRemoteCommand(ctx.getSource(), "BACKUP_CURRENT");
                         })
                         .then(net.minecraft.server.command.CommandManager.argument("comment", StringArgumentType.greedyString())
                                 .executes(ctx -> {
-                                    saveAllWorlds(ctx.getSource());
                                     return executeRemoteCommand(ctx.getSource(),
                                             String.format("BACKUP_CURRENT %s", StringArgumentType.getString(ctx, "comment")));
                                 })
@@ -276,19 +273,25 @@ public class Command {
      */
     private static void saveAllWorlds(ServerCommandSource source) {
         MinecraftServer server = source.getServer();
-        source.sendFeedback(() -> Text.translatable("minebackup.message.save.start"), true);
+        source.sendFeedback(() -> Text.translatable("minebackup.message.save.start"), false);
         for (ServerWorld world : server.getWorlds()) {
             world.save(null, true, false);
         }
-        source.sendFeedback(() -> Text.translatable("minebackup.message.save.success"), true);
+        source.sendFeedback(() -> Text.translatable("minebackup.message.save.success"), false);
     }
 
     private static void handleGenericResponse(ServerCommandSource source, String response, String commandType) {
         source.getServer().execute(() -> {
-            if (response != null && response.startsWith("ERROR:")) {
+            if (response == null || response.isBlank()) {
+                source.sendError(Text.translatable("minebackup.message.command.fail",
+                        Text.translatable("minebackup.message.no_response")));
+            } else if (response.startsWith("ERROR:")) {
                 source.sendError(Text.translatable("minebackup.message.command.fail", localizeErrorDetail(response)));
             } else {
-                source.sendFeedback(() -> Text.translatable("minebackup.message." + commandType + ".response", response), false);
+                String detail = extractSuccessDetail(response);
+                if (detail != null) {
+                    source.sendFeedback(() -> Text.translatable("minebackup.message." + commandType + ".response", detail), false);
+                }
             }
         });
     }
@@ -310,9 +313,40 @@ public class Command {
 
     private static int executeRemoteCommand(ServerCommandSource source, String command) {
         source.sendFeedback(() -> Text.translatable("minebackup.message.command.sent", command), false);
-        String commandType = command.split(" ")[0].toLowerCase();
+        String commandType = normalizeCommandType(command.split(" ")[0].toLowerCase(Locale.ROOT));
         queryBackend(command, response -> handleGenericResponse(source, response, commandType));
         return 1;
+    }
+
+    private static String normalizeCommandType(String commandType) {
+        return "restore_current_latest".equals(commandType) ? "restore_current" : commandType;
+    }
+
+    private static String extractSuccessDetail(String response) {
+        String normalized = response == null ? "" : response.trim();
+        if (normalized.isEmpty() || "OK".equalsIgnoreCase(normalized)) {
+            return null;
+        }
+        if (normalized.regionMatches(true, 0, "OK:", 0, 3)) {
+            String detail = normalized.substring(3).trim();
+            return detail.isEmpty() ? null : detail;
+        }
+        return normalized;
+    }
+
+    private static String normalizeSuggestionInput(String remaining) {
+        String normalized = remaining == null ? "" : remaining;
+        if (!normalized.isEmpty() && (normalized.charAt(0) == '\'' || normalized.charAt(0) == '"')) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
+    }
+
+    private static String quoteSuggestion(String value) {
+        if (value.indexOf(' ') < 0 && value.indexOf('"') < 0 && value.indexOf('\'') < 0) {
+            return value;
+        }
+        return "'" + value.replace("'", "\\'") + "'";
     }
 
     private static void handleListConfigsResponse(ServerCommandSource source, String response) {
@@ -395,12 +429,10 @@ public class Command {
                     if (response != null && response.startsWith("OK:")) {
                         String data = response.substring(3);
                         String[] files = data.split(";");
-                        String remaining = builder.getRemaining();
-                        String remLower = remaining == null ? "" : remaining.toLowerCase(Locale.ROOT);
+                        String remLower = normalizeSuggestionInput(builder.getRemaining()).toLowerCase(Locale.ROOT);
                         for (String file : files) {
                             if (!file.isEmpty() && file.toLowerCase(Locale.ROOT).startsWith(remLower)) {
-                                // 直接建议原始文件名，避免强制加引号影响命令输入体验。
-                                builder.suggest(file);
+                                builder.suggest(quoteSuggestion(file));
                             }
                         }
                     }
@@ -418,15 +450,10 @@ public class Command {
                     if (response != null && response.startsWith("OK:")) {
                         String data = response.substring(3);
                         String[] files = data.split(";");
-                        String remaining = builder.getRemaining();
-                        String normalized = remaining == null ? "" : remaining;
-                        if (!normalized.isEmpty() && (normalized.charAt(0) == '\'' || normalized.charAt(0) == '"')) {
-                            normalized = normalized.substring(1);
-                        }
-                        String remLower = normalized.toLowerCase(Locale.ROOT);
+                        String remLower = normalizeSuggestionInput(builder.getRemaining()).toLowerCase(Locale.ROOT);
                         for (String file : files) {
                             if (!file.isEmpty() && file.toLowerCase(Locale.ROOT).startsWith(remLower)) {
-                                builder.suggest("'" + file.replace("'", "\\'") + "'");
+                                builder.suggest(quoteSuggestion(file));
                             }
                         }
                     }

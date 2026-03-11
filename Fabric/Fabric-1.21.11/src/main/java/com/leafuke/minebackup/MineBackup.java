@@ -30,13 +30,15 @@ public class MineBackup implements ModInitializer {
 
     public static final String MOD_ID = "minebackup";
     // KnotLink 协议版本号，用于与主程序握手时进行版本兼容性检查
-    public static final String MOD_VERSION = "1.1.1";
+    public static final String MOD_VERSION = "1.1.2";
+    private static final String MIN_MAIN_PROGRAM_VERSION = "1.14.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     // KnotLink 订阅器实例
     private static SignalSubscriber knotLinkSubscriber = null;
     // 服务器实例（使用 volatile 保证线程安全）
     private static volatile MinecraftServer serverInstance;
+    private static volatile String lastHandshakeSuccessVersion = null;
 
     // 自动保存冻结状态
     private static volatile boolean saveFrozen = false;
@@ -73,11 +75,9 @@ public class MineBackup implements ModInitializer {
      * 注册服务器生命周期事件
      */
     private void registerServerLifecycleEvents() {
-        // 服务器启动事件
         ServerLifecycleEvents.SERVER_STARTING.register(server -> {
-            // 如果已经有订阅器实例，不重复启动
             if (knotLinkSubscriber == null) {
-                LOGGER.info("[MineBackup] 服务器正在启动，初始化 KnotLink 订阅器...");
+                LOGGER.info("[MineBackup] 服务器正在启动，正在初始化 KnotLink 订阅器...");
                 serverInstance = server;
                 knotLinkSubscriber = new SignalSubscriber(BROADCAST_APP_ID, BROADCAST_SIGNAL_ID);
                 knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
@@ -88,6 +88,7 @@ public class MineBackup implements ModInitializer {
                 knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
             }
 
+            lastHandshakeSuccessVersion = null;
             // 加载配置并启动自动备份（如果配置了的话）
             Config.load();
             if (Config.hasAutoBackup()) {
@@ -246,105 +247,30 @@ public class MineBackup implements ModInitializer {
     }
 
     /**
-     * 热备份前执行一次完整保存：先落玩家数据，再强制保存区块与 level.dat，最后才冻结自动保存。
+     * 热备份前执行一次完整保存。
+     * 这里不能依赖映射名字符串反射，发布版运行时不会重映射这些名字。
      */
     private boolean saveAllDataForHotBackup(MinecraftServer server) {
         if (server == null) {
             return false;
         }
-        if (!savePlayerDataForHotBackup(server)) {
-            LOGGER.warn("[MineBackup] 热备份前未能显式保存玩家数据，将继续执行完整世界保存。");
-        }
-        Boolean byEverything = invokeServerSaveMethod(server, "saveEverything");
-        if (byEverything != null) {
-            return byEverything;
-        }
-        Boolean bySave = invokeServerSaveMethod(server, "save");
-        if (bySave != null) {
-            return bySave;
-        }
-        Boolean byChunks = invokeServerSaveMethod(server, "saveAllChunks");
-        if (byChunks != null) {
-            return byChunks;
-        }
-        Boolean byAll = invokeServerSaveMethod(server, "saveAll");
-        if (byAll != null) {
-            return byAll;
-        }
-        LOGGER.warn("[MineBackup] 未找到可用于热备份的完整世界保存方法。");
-        return false;
-    }
 
-    private boolean savePlayerDataForHotBackup(MinecraftServer server) {
-        Object playerSaveHandler = resolvePlayerSaveHandler(server);
-        if (playerSaveHandler == null) {
-            return false;
-        }
-        Boolean bySaveAllPlayerData = invokeNoArgMethod(playerSaveHandler, "saveAllPlayerData", "玩家数据保存");
-        if (bySaveAllPlayerData != null) {
-            return bySaveAllPlayerData;
-        }
-        Boolean bySaveAll = invokeNoArgMethod(playerSaveHandler, "saveAll", "玩家数据保存");
-        if (bySaveAll != null) {
-            return bySaveAll;
-        }
-        return false;
-    }
+        savePlayerDataForHotBackup(server);
 
-    private Object resolvePlayerSaveHandler(MinecraftServer server) {
-        Object playerList = invokeNoArgGetter(server, "getPlayerList");
-        if (playerList != null) {
-            return playerList;
-        }
-        return invokeNoArgGetter(server, "getPlayerManager");
-    }
-
-    private Object invokeNoArgGetter(Object target, String methodName) {
         try {
-            return target.getClass().getMethod(methodName).invoke(target);
-        } catch (NoSuchMethodException ignored) {
-            return null;
-        } catch (Throwable t) {
-            LOGGER.warn("[MineBackup] 调用 {} 准备热备份时失败: {}", methodName, t.getMessage());
-            return null;
-        }
-    }
-
-    private Boolean invokeNoArgMethod(Object target, String methodName, String actionName) {
-        try {
-            java.lang.reflect.Method method = target.getClass().getMethod(methodName);
-            Object result = method.invoke(target);
-            if (method.getReturnType() == boolean.class || method.getReturnType() == Boolean.class) {
-                return Boolean.TRUE.equals(result);
-            }
+            server.saveAllChunks(true, true, true);
             return true;
-        } catch (NoSuchMethodException ignored) {
-            return null;
         } catch (Throwable t) {
-            LOGGER.warn("[MineBackup] 调用 {} 执行{}时失败: {}", methodName, actionName, t.getMessage());
+            LOGGER.warn("[MineBackup] 热备份前保存世界数据失败: {}", t.getMessage());
             return false;
         }
     }
 
-    /**
-     * 反射调用服务器保存方法，返回：
-     * - true/false：方法调用成功并得到布尔结果
-     * - null：方法不存在或调用失败（上层继续回退）
-     */
-    private Boolean invokeServerSaveMethod(MinecraftServer server, String methodName) {
+    private void savePlayerDataForHotBackup(MinecraftServer server) {
         try {
-            java.lang.reflect.Method method = server.getClass().getMethod(
-                    methodName, boolean.class, boolean.class, boolean.class);
-            Object result = method.invoke(server, true, true, true);
-            if (method.getReturnType() == boolean.class || method.getReturnType() == Boolean.class) {
-                return Boolean.TRUE.equals(result);
-            }
-            return true;
-        } catch (NoSuchMethodException ignored) {
-            return null;
+            server.getPlayerList().saveAll();
         } catch (Throwable t) {
-            LOGGER.warn("[MineBackup] 调用 {} 进行完整保存时失败: {}", methodName, t.getMessage());
-            return null;
+            LOGGER.warn("[MineBackup] 热备份前未能显式保存玩家数据: {}", t.getMessage());
         }
     }
 
@@ -385,6 +311,7 @@ public class MineBackup implements ModInitializer {
             String action = eventData.get("action");
             String world = eventData.get("world");
             String minModVersion = eventData.get("min_mod_version");
+            String displayMainVersion = mainVersion != null ? mainVersion : "?";
 
             LOGGER.info("[MineBackup] 收到握手请求: 主程序v{}, action={}, world={}, min_mod_version={}",
                     mainVersion, action, world, minModVersion);
@@ -402,6 +329,15 @@ public class MineBackup implements ModInitializer {
             OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "HANDSHAKE_RESPONSE " + MOD_VERSION);
             LOGGER.info("[MineBackup] 已发送 HANDSHAKE_RESPONSE，模组版本: {}", MOD_VERSION);
 
+            if (!isVersionCompatible(mainVersion, MIN_MAIN_PROGRAM_VERSION)) {
+                serverInstance.execute(() -> {
+                    serverInstance.getPlayerList().broadcastSystemMessage(
+                            Component.translatable("minebackup.message.handshake.main_version_incompatible",
+                                    displayMainVersion, MIN_MAIN_PROGRAM_VERSION), false);
+                });
+                return;
+            }
+
             // 版本不兼容时警告玩家
             if (!compatible) {
                 try {
@@ -413,13 +349,14 @@ public class MineBackup implements ModInitializer {
                 } catch (Exception ignored) { }
                 LOGGER.warn("[MineBackup] 模组版本 {} 不满足最低要求 {}", MOD_VERSION, minModVersion);
             } else {
-                try {
-                    serverInstance.execute(() -> {
-                        serverInstance.getPlayerList().broadcastSystemMessage(
-                                Component.translatable("minebackup.message.handshake.success",
-                                        mainVersion != null ? mainVersion : "?"), false);
-                    });
-                } catch (Exception ignored) { }
+                if (shouldBroadcastHandshakeSuccess(displayMainVersion)) {
+                    try {
+                        serverInstance.execute(() -> {
+                            serverInstance.getPlayerList().broadcastSystemMessage(
+                                    Component.translatable("minebackup.message.handshake.success", displayMainVersion), false);
+                        });
+                    } catch (Exception ignored) { }
+                }
             }
             return;
         }
@@ -682,6 +619,16 @@ public class MineBackup implements ModInitializer {
         saveFrozen = false;
         freezeTimestamp = 0;
         LOGGER.info("[Unfreeze] Auto-save unfrozen.");
+    }
+
+    private static boolean shouldBroadcastHandshakeSuccess(String mainVersion) {
+        synchronized (MineBackup.class) {
+            if (mainVersion.equals(lastHandshakeSuccessVersion)) {
+                return false;
+            }
+            lastHandshakeSuccessVersion = mainVersion;
+            return true;
+        }
     }
 
     private void checkFreezeTimeout() {
