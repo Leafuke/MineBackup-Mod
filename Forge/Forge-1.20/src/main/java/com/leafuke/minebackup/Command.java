@@ -1,11 +1,12 @@
 package com.leafuke.minebackup;
 
-import com.leafuke.minebackup.command.SingleQuotedStringArgumentType;
 import com.leafuke.minebackup.knotlink.OpenSocketQuerier;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.context.ParsedCommandNode;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.minecraft.commands.CommandSourceStack;
@@ -32,25 +33,33 @@ public class Command {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("mb")
                 .requires(Command::hasCommandAccess)
-                .then(Commands.literal("save").executes(ctx -> {
-                    if (handleDedicatedServerUnsupported(ctx.getSource())) {
-                        return 1;
-                    }
-                    saveAllWorlds(ctx.getSource());
-                    return 1;
-                }))
-                .then(Commands.literal("list_configs").executes(ctx -> executeDedicatedAware(ctx.getSource(), () -> {
-                    ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_configs.start"), false);
-                    queryBackend("LIST_CONFIGS", response -> handleListConfigsResponse(ctx.getSource(), response));
-                })))
+                .then(Commands.literal("save")
+                        .executes(ctx -> {
+                            if (handleDedicatedServerUnsupported(ctx.getSource())) {
+                                return 1;
+                            }
+                            saveAllWorlds(ctx.getSource());
+                            return 1;
+                        })
+                )
+                .then(Commands.literal("list_configs")
+                        .executes(ctx -> executeDedicatedAware(ctx.getSource(), () -> {
+                            ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_configs.start"), false);
+                            queryBackend("LIST_CONFIGS", response -> handleListConfigsResponse(ctx.getSource(), response));
+                        }))
+                )
                 .then(Commands.literal("list_worlds")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .executes(ctx -> executeDedicatedAware(ctx.getSource(), () -> {
                                     int configId = IntegerArgumentType.getInteger(ctx, "config_id");
                                     ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_worlds.start", String.valueOf(configId)), false);
-                                    queryBackend(String.format("LIST_WORLDS %d", configId),
-                                            response -> handleListWorldsResponse(ctx.getSource(), response, configId));
-                                }))))
+                                    queryBackend(
+                                            String.format("LIST_WORLDS %d", configId),
+                                            response -> handleListWorldsResponse(ctx.getSource(), response, configId)
+                                    );
+                                }))
+                        )
+                )
                 .then(Commands.literal("list_backups")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
@@ -58,44 +67,75 @@ public class Command {
                                             int configId = IntegerArgumentType.getInteger(ctx, "config_id");
                                             int worldIndex = IntegerArgumentType.getInteger(ctx, "world_index");
                                             ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_backups.start", String.valueOf(configId), String.valueOf(worldIndex)), false);
-                                            queryBackend(String.format("LIST_BACKUPS %d %d", configId, worldIndex),
-                                                    response -> handleListBackupsResponse(ctx.getSource(), response, configId, worldIndex));
-                                        })))))
+                                            queryBackend(
+                                                    String.format("LIST_BACKUPS %d %d", configId, worldIndex),
+                                                    response -> handleListBackupsResponse(ctx.getSource(), response, configId, worldIndex)
+                                            );
+                                        }))
+                                )
+                        )
+                )
                 .then(Commands.literal("backup")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
-                                        .executes(ctx -> executeRemoteCommand(ctx.getSource(), String.format("BACKUP %d %d",
-                                                IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                IntegerArgumentType.getInteger(ctx, "world_index"))))
-                                        .then(Commands.argument("comment", StringArgumentType.greedyString())
-                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(), String.format("BACKUP %d %d %s",
+                                        .executes(ctx -> executeRemoteCommand(ctx.getSource(),
+                                                String.format("BACKUP %d %d",
                                                         IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                        IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                        StringArgumentType.getString(ctx, "comment"))))))))
+                                                        IntegerArgumentType.getInteger(ctx, "world_index"))))
+                                        .then(Commands.argument("comment", StringArgumentType.greedyString())
+                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
+                                                        String.format("BACKUP %d %d %s",
+                                                                IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                                IntegerArgumentType.getInteger(ctx, "world_index"),
+                                                                StringArgumentType.getString(ctx, "comment"))))
+                                        )
+                                )
+                        )
+                )
                 .then(Commands.literal("restore")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
-                                        .then(Commands.argument("backup_file", SingleQuotedStringArgumentType.singleQuotedString())
+                                        .then(Commands.argument("backup_file", StringArgumentType.string())
                                                 .suggests((ctx, builder) -> suggestBackupFiles(
                                                         IntegerArgumentType.getInteger(ctx, "config_id"),
                                                         IntegerArgumentType.getInteger(ctx, "world_index"),
                                                         builder))
-                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(), String.format("RESTORE %d %d %s",
-                                                        IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                        IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                        SingleQuotedStringArgumentType.getSingleQuotedString(ctx, "backup_file"))))))))
+                                                .executes(ctx -> {
+                                                    String backupFile = requireSingleQuotedString(ctx, "backup_file");
+                                                    if (backupFile == null) {
+                                                        return 0;
+                                                    }
+                                                    return executeRemoteCommand(ctx.getSource(),
+                                                            String.format("RESTORE %d %d %s",
+                                                                    IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                                    IntegerArgumentType.getInteger(ctx, "world_index"),
+                                                                    backupFile));
+                                                })
+                                        )
+                                )
+                        )
+                )
                 .then(Commands.literal("quicksave")
                         .executes(ctx -> executeRemoteCommand(ctx.getSource(), "BACKUP_CURRENT"))
                         .then(Commands.argument("comment", StringArgumentType.greedyString())
                                 .executes(ctx -> executeRemoteCommand(ctx.getSource(),
-                                        String.format("BACKUP_CURRENT %s", StringArgumentType.getString(ctx, "comment"))))))
+                                        String.format("BACKUP_CURRENT %s", StringArgumentType.getString(ctx, "comment"))))
+                        )
+                )
                 .then(Commands.literal("quickrestore")
                         .executes(ctx -> executeRemoteCommand(ctx.getSource(), "RESTORE_CURRENT_LATEST"))
-                        .then(Commands.argument("backup_file", SingleQuotedStringArgumentType.singleQuotedString())
+                        .then(Commands.argument("backup_file", StringArgumentType.string())
                                 .suggests((ctx, builder) -> suggestCurrentBackupFiles(builder))
-                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
-                                        String.format("RESTORE_CURRENT %s",
-                                                SingleQuotedStringArgumentType.getSingleQuotedString(ctx, "backup_file"))))))
+                                .executes(ctx -> {
+                                    String backupFile = requireSingleQuotedString(ctx, "backup_file");
+                                    if (backupFile == null) {
+                                        return 0;
+                                    }
+                                    return executeRemoteCommand(ctx.getSource(),
+                                            String.format("RESTORE_CURRENT %s", backupFile));
+                                })
+                        )
+                )
                 .then(Commands.literal("auto")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
@@ -106,62 +146,83 @@ public class Command {
                                                             IntegerArgumentType.getInteger(ctx, "world_index"),
                                                             IntegerArgumentType.getInteger(ctx, "internal_time")
                                                     );
-                                                    return executeRemoteCommand(ctx.getSource(), String.format("AUTO_BACKUP %d %d %d",
-                                                            IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                            IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                            IntegerArgumentType.getInteger(ctx, "internal_time")));
-                                                })))))
+                                                    return executeRemoteCommand(ctx.getSource(),
+                                                            String.format("AUTO_BACKUP %d %d %d",
+                                                                    IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                                    IntegerArgumentType.getInteger(ctx, "world_index"),
+                                                                    IntegerArgumentType.getInteger(ctx, "internal_time")));
+                                                })
+                                        )
+                                )
+                        )
+                )
                 .then(Commands.literal("stop")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
                                         .executes(ctx -> {
                                             Config.clearAutoBackup();
-                                            return executeRemoteCommand(ctx.getSource(), String.format("STOP_AUTO_BACKUP %d %d",
-                                                    IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                    IntegerArgumentType.getInteger(ctx, "world_index")));
-                                        }))))
+                                            return executeRemoteCommand(ctx.getSource(),
+                                                    String.format("STOP_AUTO_BACKUP %d %d",
+                                                            IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                            IntegerArgumentType.getInteger(ctx, "world_index")));
+                                        })
+                                )
+                        )
+                )
                 .then(Commands.literal("snap")
                         .then(Commands.argument("config_id", IntegerArgumentType.integer())
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
-                                        .then(Commands.argument("backup_file", SingleQuotedStringArgumentType.singleQuotedString())
+                                        .then(Commands.argument("backup_file", StringArgumentType.string())
                                                 .suggests((ctx, builder) -> suggestBackupFiles(
                                                         IntegerArgumentType.getInteger(ctx, "config_id"),
                                                         IntegerArgumentType.getInteger(ctx, "world_index"),
                                                         builder))
                                                 .executes(ctx -> {
+                                                    String backupFile = requireSingleQuotedString(ctx, "backup_file");
+                                                    if (backupFile == null) {
+                                                        return 0;
+                                                    }
                                                     String command = String.format("ADD_TO_WE %d %d %s",
                                                             IntegerArgumentType.getInteger(ctx, "config_id"),
                                                             IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                            SingleQuotedStringArgumentType.getSingleQuotedString(ctx, "backup_file"));
+                                                            backupFile);
                                                     ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.snap.sent", command), false);
                                                     return executeDedicatedAware(ctx.getSource(),
                                                             () -> queryBackend(command, response -> handleGenericResponse(ctx.getSource(), response, "snap")));
-                                                })))))
-                .then(Commands.literal("freeze").executes(ctx -> {
-                    if (handleDedicatedServerUnsupported(ctx.getSource())) {
-                        return 1;
-                    }
-                    if (MineBackup.isSaveFrozen()) {
-                        ctx.getSource().sendFailure(Component.translatable("minebackup.message.freeze.already"));
-                        return 0;
-                    }
-                    saveAllWorlds(ctx.getSource());
-                    MineBackup.freezeAutoSave();
-                    ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.freeze.success"), true);
-                    return 1;
-                }))
-                .then(Commands.literal("unfreeze").executes(ctx -> {
-                    if (handleDedicatedServerUnsupported(ctx.getSource())) {
-                        return 1;
-                    }
-                    if (!MineBackup.isSaveFrozen()) {
-                        ctx.getSource().sendFailure(Component.translatable("minebackup.message.unfreeze.already"));
-                        return 0;
-                    }
-                    MineBackup.unfreezeAutoSave();
-                    ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.unfreeze.success"), true);
-                    return 1;
-                }))
+                                                })
+                                        )
+                                )
+                        )
+                )
+                .then(Commands.literal("freeze")
+                        .executes(ctx -> {
+                            if (handleDedicatedServerUnsupported(ctx.getSource())) {
+                                return 1;
+                            }
+                            if (MineBackup.isSaveFrozen()) {
+                                ctx.getSource().sendFailure(Component.translatable("minebackup.message.freeze.already"));
+                                return 0;
+                            }
+                            saveAllWorlds(ctx.getSource());
+                            MineBackup.freezeAutoSave();
+                            ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.freeze.success"), true);
+                            return 1;
+                        })
+                )
+                .then(Commands.literal("unfreeze")
+                        .executes(ctx -> {
+                            if (handleDedicatedServerUnsupported(ctx.getSource())) {
+                                return 1;
+                            }
+                            if (!MineBackup.isSaveFrozen()) {
+                                ctx.getSource().sendFailure(Component.translatable("minebackup.message.unfreeze.already"));
+                                return 0;
+                            }
+                            MineBackup.unfreezeAutoSave();
+                            ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.unfreeze.success"), true);
+                            return 1;
+                        })
+                )
         );
 
         dispatcher.register(Commands.literal("minebackup")
@@ -337,6 +398,29 @@ public class Command {
             return null;
         }
         return "'" + value + "'";
+    }
+
+    private static String requireSingleQuotedString(CommandContext<CommandSourceStack> ctx, String argumentName) {
+        String rawArgument = getRawArgument(ctx, argumentName);
+        if (rawArgument == null || rawArgument.length() < 2 || rawArgument.charAt(0) != '\'' || rawArgument.charAt(rawArgument.length() - 1) != '\'') {
+            ctx.getSource().sendFailure(Component.literal("[MineBackup] 文件名参数必须使用单引号，例如 'backup.zip'。"));
+            return null;
+        }
+        return StringArgumentType.getString(ctx, argumentName);
+    }
+
+    private static String getRawArgument(CommandContext<CommandSourceStack> ctx, String argumentName) {
+        String input = ctx.getInput();
+        for (ParsedCommandNode<CommandSourceStack> node : ctx.getNodes()) {
+            if (argumentName.equals(node.getNode().getName())) {
+                int start = node.getRange().getStart();
+                int end = node.getRange().getEnd();
+                if (start >= 0 && end <= input.length() && start < end) {
+                    return input.substring(start, end);
+                }
+            }
+        }
+        return null;
     }
 
     private static void handleListConfigsResponse(CommandSourceStack source, String response) {

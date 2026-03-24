@@ -1,12 +1,12 @@
 package com.leafuke.minebackup;
 
-import com.leafuke.minebackup.command.SingleQuotedStringArgumentType;
 import com.leafuke.minebackup.knotlink.OpenSocketQuerier;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.context.ParsedCommandNode;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.minecraft.server.MinecraftServer;
@@ -96,16 +96,22 @@ public class Command {
                 .then(CommandManager.literal("restore")
                         .then(CommandManager.argument("config_id", IntegerArgumentType.integer())
                                 .then(CommandManager.argument("world_index", IntegerArgumentType.integer())
-                                        .then(CommandManager.argument("backup_file", SingleQuotedStringArgumentType.singleQuotedString())
+                                        .then(CommandManager.argument("backup_file", StringArgumentType.string())
                                                 .suggests((ctx, builder) -> suggestBackupFiles(
                                                         IntegerArgumentType.getInteger(ctx, "config_id"),
                                                         IntegerArgumentType.getInteger(ctx, "world_index"),
                                                         builder))
-                                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
-                                                        String.format("RESTORE %d %d %s",
-                                                                IntegerArgumentType.getInteger(ctx, "config_id"),
-                                                                IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                                SingleQuotedStringArgumentType.getSingleQuotedString(ctx, "backup_file"))))
+                                                .executes(ctx -> {
+                                                    String backupFile = requireSingleQuotedString(ctx, "backup_file");
+                                                    if (backupFile == null) {
+                                                        return 0;
+                                                    }
+                                                    return executeRemoteCommand(ctx.getSource(),
+                                                            String.format("RESTORE %d %d %s",
+                                                                    IntegerArgumentType.getInteger(ctx, "config_id"),
+                                                                    IntegerArgumentType.getInteger(ctx, "world_index"),
+                                                                    backupFile));
+                                                })
                                         )
                                 )
                         )
@@ -119,11 +125,16 @@ public class Command {
                 )
                 .then(CommandManager.literal("quickrestore")
                         .executes(ctx -> executeRemoteCommand(ctx.getSource(), "RESTORE_CURRENT_LATEST"))
-                        .then(CommandManager.argument("backup_file", SingleQuotedStringArgumentType.singleQuotedString())
+                        .then(CommandManager.argument("backup_file", StringArgumentType.string())
                                 .suggests((ctx, builder) -> suggestCurrentBackupFiles(builder))
-                                .executes(ctx -> executeRemoteCommand(ctx.getSource(),
-                                        String.format("RESTORE_CURRENT %s",
-                                                SingleQuotedStringArgumentType.getSingleQuotedString(ctx, "backup_file"))))
+                                .executes(ctx -> {
+                                    String backupFile = requireSingleQuotedString(ctx, "backup_file");
+                                    if (backupFile == null) {
+                                        return 0;
+                                    }
+                                    return executeRemoteCommand(ctx.getSource(),
+                                            String.format("RESTORE_CURRENT %s", backupFile));
+                                })
                         )
                 )
                 .then(CommandManager.literal("auto")
@@ -162,16 +173,20 @@ public class Command {
                 .then(CommandManager.literal("snap")
                         .then(CommandManager.argument("config_id", IntegerArgumentType.integer())
                                 .then(CommandManager.argument("world_index", IntegerArgumentType.integer())
-                                        .then(CommandManager.argument("backup_file", SingleQuotedStringArgumentType.singleQuotedString())
+                                        .then(CommandManager.argument("backup_file", StringArgumentType.string())
                                                 .suggests((ctx, builder) -> suggestBackupFiles(
                                                         IntegerArgumentType.getInteger(ctx, "config_id"),
                                                         IntegerArgumentType.getInteger(ctx, "world_index"),
                                                         builder))
                                                 .executes(ctx -> {
+                                                    String backupFile = requireSingleQuotedString(ctx, "backup_file");
+                                                    if (backupFile == null) {
+                                                        return 0;
+                                                    }
                                                     String command = String.format("ADD_TO_WE %d %d %s",
                                                             IntegerArgumentType.getInteger(ctx, "config_id"),
                                                             IntegerArgumentType.getInteger(ctx, "world_index"),
-                                                            SingleQuotedStringArgumentType.getSingleQuotedString(ctx, "backup_file"));
+                                                            backupFile);
                                                     ctx.getSource().sendFeedback(() -> Text.translatable("minebackup.message.snap.sent", command), false);
                                                     return executeDedicatedAware(ctx.getSource(),
                                                             () -> queryBackend(command, response -> handleGenericResponse(ctx.getSource(), response, "snap")));
@@ -390,6 +405,29 @@ public class Command {
             return null;
         }
         return "'" + value + "'";
+    }
+
+    private static String requireSingleQuotedString(CommandContext<ServerCommandSource> ctx, String argumentName) {
+        String rawArgument = getRawArgument(ctx, argumentName);
+        if (rawArgument == null || rawArgument.length() < 2 || rawArgument.charAt(0) != '\'' || rawArgument.charAt(rawArgument.length() - 1) != '\'') {
+            ctx.getSource().sendError(Text.literal("[MineBackup] 文件名参数必须使用单引号，例如 'backup.zip'。"));
+            return null;
+        }
+        return StringArgumentType.getString(ctx, argumentName);
+    }
+
+    private static String getRawArgument(CommandContext<ServerCommandSource> ctx, String argumentName) {
+        String input = ctx.getInput();
+        for (ParsedCommandNode<ServerCommandSource> node : ctx.getNodes()) {
+            if (argumentName.equals(node.getNode().getName())) {
+                int start = node.getRange().getStart();
+                int end = node.getRange().getEnd();
+                if (start >= 0 && end <= input.length() && start < end) {
+                    return input.substring(start, end);
+                }
+            }
+        }
+        return null;
     }
 
     private static void handleListConfigsResponse(ServerCommandSource source, String response) {
