@@ -32,6 +32,7 @@ dependencies {
 
 processResources {
 	inputs.property "version", project.version
+	filteringCharset = 'UTF-8'
 
 	filesMatching("fabric.mod.json") {
 		expand "version": inputs.properties.version

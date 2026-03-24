@@ -5,6 +5,7 @@ import com.leafuke.minebackup.knotlink.SignalSubscriber;
 import com.leafuke.minebackup.restore.HotRestoreState;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.api.distmarker.Dist;
@@ -15,6 +16,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,58 +27,44 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import net.minecraft.server.level.ServerLevel;
-
-// 使用 @Mod 注解，这是 NeoForge 的入口点
 @Mod(MineBackup.MOD_ID)
 public class MineBackup {
-
     public static final String MOD_ID = "minebackup";
     public static final String PLUGIN_GUIDE_URL = "https://github.com/Leafuke/MineBackup-Mod";
     public static final String MOD_VERSION = "1.1.2";
     private static final String MIN_MAIN_PROGRAM_VERSION = "1.14.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-    private static SignalSubscriber knotLinkSubscriber = null;
-    private static volatile MinecraftServer serverInstance;
-    private static volatile String lastHandshakeSuccessVersion = null;
-
-    private static volatile boolean saveFrozen = false;
-    private static final List<ServerLevel> frozenWorlds = new ArrayList<>();
-    private static volatile long freezeTimestamp = 0;
-    private static final long FREEZE_TIMEOUT_MS = 3 * 60 * 1000L;  // 3min
-
     public static final String BROADCAST_APP_ID = "0x00000020";
     public static final String BROADCAST_SIGNAL_ID = "0x00000020";
-
     private static final String QUERIER_APP_ID = "0x00000020";
     private static final String QUERIER_SOCKET_ID = "0x00000010";
 
-    // 模组构造函数
+    private static SignalSubscriber knotLinkSubscriber;
+    private static volatile MinecraftServer serverInstance;
+    private static volatile String lastHandshakeSuccessVersion;
+
+    private static volatile boolean saveFrozen = false;
+    private static final List<ServerLevel> frozenWorlds = new ArrayList<>();
+    private static volatile long freezeTimestamp = 0L;
+
     public MineBackup(IEventBus modEventBus, Dist dist) {
-        LOGGER.info("Initializing MineBackup for NeoForge...");
-
-        // 注册服务器生命周期事件和命令事件
-        // 这些事件在通用事件总线上
         NeoForge.EVENT_BUS.register(this);
-
-        // 如果在客户端环境中，则初始化客户端逻辑
         if (dist.isClient()) {
             MineBackupClient.initialize();
         }
     }
 
-    // 监听命令注册事件，替代 Fabric 的 CommandRegistrationCallback
     @SubscribeEvent
     public void onRegisterCommands(RegisterCommandsEvent event) {
         Command.register(event.getDispatcher(), event.getBuildContext(), event.getCommandSelection());
     }
 
-    // 监听服务器启动事件，替代 Fabric 的 ServerLifecycleEvents.SERVER_STARTING
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent event) {
         serverInstance = event.getServer();
         lastHandshakeSuccessVersion = null;
+
         if (event.getServer().isDedicatedServer()) {
             LOGGER.info("MineBackup mod is running on a dedicated server. Dedicated workflows are delegated to the plugin.");
             if (knotLinkSubscriber != null) {
@@ -85,19 +73,18 @@ public class MineBackup {
             }
             return;
         }
+
         if (knotLinkSubscriber == null) {
-            LOGGER.info("MineBackup Mod: Server is starting, initializing KnotLink Subscriber...");
             knotLinkSubscriber = new SignalSubscriber(BROADCAST_APP_ID, BROADCAST_SIGNAL_ID);
             knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
             new Thread(knotLinkSubscriber::start).start();
         } else {
-            LOGGER.info("MineBackup Mod: Server is starting, KnotLink Subscriber has been here...");
             knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
         }
 
         Config.load();
         if (Config.hasAutoBackup()) {
-            String cmd = String.format("AUTO_BACKUP %d %d %d", Config.getConfigId(), Config.getWorldIndex(), Config.getInternalTime());
+            String cmd = String.format("AUTO_BACKUP %s %d %d", Config.getConfigId(), Config.getWorldIndex(), Config.getInternalTime());
             OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, cmd);
             LOGGER.info("Sent auto backup request from config: {}", cmd);
         }
@@ -106,22 +93,88 @@ public class MineBackup {
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
         if (saveFrozen) {
-            LOGGER.warn("[Safety] Server stopping while auto-save is frozen! Unfreezing now.");
+            LOGGER.warn("Server stopping while auto-save is frozen. Unfreezing now.");
             unfreezeAutoSave(event.getServer());
         }
+        // 不关闭KnotLink服务，因为等下还有可能rejoin
+    }
 
-        if (knotLinkSubscriber != null) {
-            knotLinkSubscriber.stop();
-            knotLinkSubscriber = null;
-            LOGGER.info("MineBackup Mod: Server stopping, stopped KnotLink Subscriber.");
+    @SubscribeEvent
+    public void onServerTick(ServerTickEvent.Post event) {
+        checkFreezeTimeout();
+    }
+
+    public static void freezeAutoSave(MinecraftServer server) {
+        if (saveFrozen) {
+            LOGGER.warn("Auto-save already frozen, skipping.");
+            return;
+        }
+        synchronized (frozenWorlds) {
+            frozenWorlds.clear();
+            for (ServerLevel level : server.getAllLevels()) {
+                if (level != null && !level.noSave) {
+                    level.noSave = true;
+                    frozenWorlds.add(level);
+                }
+            }
+        }
+        saveFrozen = true;
+        freezeTimestamp = System.currentTimeMillis();
+        LOGGER.info("Auto-save frozen for {} dimensions.", frozenWorlds.size());
+    }
+
+    public static void unfreezeAutoSave(MinecraftServer server) {
+        if (!saveFrozen) {
+            LOGGER.warn("Auto-save is not frozen, skipping.");
+            return;
+        }
+        synchronized (frozenWorlds) {
+            for (ServerLevel level : frozenWorlds) {
+                if (level != null && level.noSave) {
+                    level.noSave = false;
+                }
+            }
+            frozenWorlds.clear();
+        }
+        saveFrozen = false;
+        freezeTimestamp = 0L;
+        LOGGER.info("Auto-save resumed.");
+    }
+
+    public static boolean isSaveFrozen() {
+        return saveFrozen;
+    }
+
+    public static boolean isVersionCompatible(String current, String required) {
+        if (required == null || required.isBlank()) {
+            return true;
+        }
+        if (current == null || current.isBlank()) {
+            return false;
+        }
+        try {
+            int[] currentParts = parseVersionParts(current);
+            int[] requiredParts = parseVersionParts(required);
+            for (int i = 0; i < 3; i++) {
+                if (currentParts[i] > requiredParts[i]) {
+                    return true;
+                }
+                if (currentParts[i] < requiredParts[i]) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            LOGGER.warn("Failed to parse version numbers: current={}, required={}", current, required);
+            return false;
         }
     }
 
-    // ----- 其余逻辑基本保持不变 -----
-
     private Map<String, String> parsePayload(String payload) {
         Map<String, String> dataMap = new HashMap<>();
-        if (payload == null || payload.isEmpty()) return dataMap;
+        if (payload == null || payload.isEmpty()) {
+            return dataMap;
+        }
         for (String pair : payload.split(";")) {
             String[] keyValue = pair.split("=", 2);
             if (keyValue.length == 2) {
@@ -131,15 +184,37 @@ public class MineBackup {
         return dataMap;
     }
 
-    /**
-     * 尝试解析当前世界存档文件夹名，优先使用根路径文件夹名称。
-     */
+    private Component getWorldDisplay(Map<String, String> eventData) {
+        String world = eventData.get("world");
+        if (world == null || world.isBlank()) {
+            return Component.translatable("minebackup.message.unknown_world");
+        }
+        return Component.literal(world);
+    }
+
+    private Component getFileDisplay(Map<String, String> eventData) {
+        String file = eventData.get("file");
+        if (file == null || file.isBlank()) {
+            return Component.translatable("minebackup.message.unknown_file");
+        }
+        return Component.literal(file);
+    }
+
+    private Component getErrorDisplay(Map<String, String> eventData) {
+        String error = eventData.get("error");
+        if (error == null || error.isBlank()) {
+            return Component.translatable("minebackup.message.unknown_error");
+        }
+        return Component.literal(error);
+    }
+
     private String resolveLevelFolder(MinecraftServer server) {
         String levelIdFromPath = null;
         try {
             Path root = server.getWorldPath(LevelResource.ROOT);
             levelIdFromPath = resolveLevelIdFromPath(root);
-        } catch (Exception ignored) { }
+        } catch (Exception ignored) {
+        }
 
         if (isValidLevelId(levelIdFromPath)) {
             return levelIdFromPath;
@@ -156,7 +231,6 @@ public class MineBackup {
         if (path == null) {
             return null;
         }
-
         Path cursor = path;
         for (int i = 0; i < 6 && cursor != null; i++) {
             if (Files.exists(cursor.resolve("level.dat"))) {
@@ -184,10 +258,7 @@ public class MineBackup {
             return false;
         }
         String normalized = levelId.trim();
-        if (normalized.isBlank()) {
-            return false;
-        }
-        if (".".equals(normalized) || "..".equals(normalized)) {
+        if (normalized.isBlank() || ".".equals(normalized) || "..".equals(normalized)) {
             return false;
         }
         return !normalized.contains("/") && !normalized.contains("\\");
@@ -204,256 +275,71 @@ public class MineBackup {
         return "world";
     }
 
-    private boolean saveAllDataForHotBackup(MinecraftServer server) {
-        if (server == null) {
-            return false;
-        }
-
-        savePlayerDataForHotBackup(server);
-
-        try {
-            server.saveAllChunks(true, true, true);
-            return true;
-        } catch (Throwable t) {
-            LOGGER.warn("Failed to save world data before hot backup: {}", t.getMessage());
-            return false;
-        }
-    }
-
-    private void savePlayerDataForHotBackup(MinecraftServer server) {
-        try {
-            server.getPlayerList().saveAll();
-        } catch (Throwable t) {
-            LOGGER.warn("Failed to explicitly save player data before hot backup: {}", t.getMessage());
-        }
-    }
-
-    private Component getWorldDisplay(Map<String, String> eventData) {
-        String world = eventData.get("world");
-        if (world == null || world.isBlank()) {
-            return Component.translatable("minebackup.message.unknown_world");
-        }
-        return Component.literal(world);
-    }
-
-    private Component getFileDisplay(Map<String, String> eventData) {
-        String file = eventData.get("file");
-        if (file == null || file.isBlank()) {
-            return Component.translatable("minebackup.message.unknown_file");
-        }
-        return Component.literal(file);
-    }
-
-    private Component getErrorDisplay(Map<String, String> eventData) {
-        String error = eventData.get("error");
-        if (error == null || error.isBlank()) {
-            return Component.translatable("minebackup.message.unknown_error");
-        }
-        return Component.literal(error);
-    }
-
     private void handleBroadcastEvent(String payload) {
-        if (serverInstance == null) return;
+        if (serverInstance == null) {
+            return;
+        }
         if (serverInstance.isDedicatedServer()) {
             LOGGER.info("Ignoring backend broadcast on dedicated server: {}", payload);
             return;
         }
-        checkFreezeTimeout();
 
         if ("minebackup save".equals(payload)) {
             serverInstance.execute(() -> {
-                LOGGER.info("Received 'minebackup save' command, executing immediate world save.");
                 serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.message.remote_save.start"), false);
-                boolean allLevelsSaved = saveAllDataForHotBackup(serverInstance);
-                if (allLevelsSaved) {
-                    serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.message.remote_save.success"), false);
-                } else {
-                    serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.message.remote_save.fail"), false);
-                }
+                boolean saved = LocalSaveCoordinator.saveForLocalCommand(serverInstance);
+                serverInstance.getPlayerList().broadcastSystemMessage(
+                        Component.translatable(saved ? "minebackup.message.remote_save.success" : "minebackup.message.remote_save.fail"),
+                        false);
             });
             return;
         }
 
-        LOGGER.info("Received MineBackup broadcast event: {}", payload);
         Map<String, String> eventData = parsePayload(payload);
         String eventType = eventData.get("event");
-        if (eventType == null) return;
+        if (eventType == null) {
+            return;
+        }
 
         if ("handshake".equals(eventType)) {
-            String mainVersion = eventData.get("version");
-            String action = eventData.get("action");
-            String world = eventData.get("world");
-            String minModVersion = eventData.get("min_mod_version");
-            String displayMainVersion = mainVersion != null ? mainVersion : "?";
-
-            LOGGER.info("Received handshake from MineBackup v{}, action={}, world={}, min_mod_version={}",
-                    mainVersion, action, world, minModVersion);
-
-            HotRestoreState.mainProgramVersion = mainVersion;
-            HotRestoreState.handshakeCompleted = true;
-            HotRestoreState.requiredMinModVersion = minModVersion;
-
-            boolean compatible = isVersionCompatible(MOD_VERSION, minModVersion);
-            HotRestoreState.versionCompatible = compatible;
-
-            OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "HANDSHAKE_RESPONSE " + MOD_VERSION);
-            LOGGER.info("Sent HANDSHAKE_RESPONSE with mod version {}", MOD_VERSION);
-
-            if (!isVersionCompatible(mainVersion, MIN_MAIN_PROGRAM_VERSION)) {
-                serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(
-                        Component.translatable("minebackup.message.handshake.main_version_incompatible",
-                                displayMainVersion, MIN_MAIN_PROGRAM_VERSION), false));
-                return;
-            }
-
-            if (!compatible) {
-                try {
-                    serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(
-                            Component.translatable("minebackup.message.handshake.version_incompatible",
-                                    MOD_VERSION, minModVersion != null ? minModVersion : "?"), false));
-                } catch (Exception ignored) { }
-                LOGGER.warn("Mod version {} does not meet minimum requirement {}", MOD_VERSION, minModVersion);
-            } else {
-                if (shouldBroadcastHandshakeSuccess(displayMainVersion)) {
-                    try {
-                        serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(
-                                Component.translatable("minebackup.message.handshake.success", displayMainVersion), false));
-                    } catch (Exception ignored) { }
-                }
-            }
+            handleHandshake(eventData);
             return;
         }
-
         if ("pre_hot_restore".equals(eventType)) {
-            LOGGER.info("Received 'pre_hot_restore'. Preparing for hot restore.");
-            serverInstance.execute(() -> {
-                serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.message.restore.preparing"), false);
-
-                HotRestoreState.isRestoring = true;
-                HotRestoreState.waitingForServerStopAck = true;
-
-                if (serverInstance.isDedicatedServer()) {
-                    LOGGER.info("Dedicated server detected. Saving, kicking players, then stopping.");
-
-                    boolean saveSuccess = serverInstance.saveAllChunks(true, true, true);
-                    if (!saveSuccess) {
-                        LOGGER.warn("World save may be incomplete before hot restore on dedicated server.");
-                    }
-
-                    var playerList = serverInstance.getPlayerList().getPlayers();
-                    Component kickMessage = Component.translatable("minebackup.message.restore.kick");
-                    for (var player : playerList.toArray(new ServerPlayer[0])) {
-                        try {
-                            player.connection.disconnect(kickMessage);
-                        } catch (Exception e) {
-                            LOGGER.warn("Failed to disconnect player {}", e.getMessage());
-                        }
-                    }
-
-                    new Thread(() -> {
-                        try {
-                            Thread.sleep(500);
-                        } catch (InterruptedException ignored) {
-                            Thread.currentThread().interrupt();
-                        }
-                        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVE_AND_EXIT_COMPLETE");
-                        LOGGER.info("Sent WORLD_SAVE_AND_EXIT_COMPLETE to MineBackup main program (dedicated).");
-                    }).start();
-
-                    serverInstance.stopServer();
-                } else {
-                    LOGGER.info("Single-player instance detected. Saving and disconnecting player.");
-
-                    String levelId = resolveRejoinLevelId(serverInstance, eventData.get("world"));
-                    MineBackupClient.worldToRejoin = levelId;
-                    HotRestoreState.levelIdToRejoin = levelId;
-                    LOGGER.info("Captured level folder for auto rejoin: {}", levelId);
-
-                    boolean saveSuccess = serverInstance.saveAllChunks(true, true, true);
-                    if (!saveSuccess) {
-                        LOGGER.warn("World save may be incomplete before hot restore on singleplayer.");
-                    }
-
-                    var players = serverInstance.getPlayerList().getPlayers();
-                    Component kickMessage = Component.translatable("minebackup.message.restore.kick");
-                    for (var player : players.toArray(new ServerPlayer[0])) {
-                        try {
-                            player.connection.disconnect(kickMessage);
-                        } catch (Exception e) {
-                            LOGGER.warn("Failed to disconnect player {}", e.getMessage());
-                        }
-                    }
-
-                    new Thread(() -> {
-                        try {
-                            Thread.sleep(400);
-                        } catch (InterruptedException ignored) {
-                            Thread.currentThread().interrupt();
-                        }
-                        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVE_AND_EXIT_COMPLETE");
-                        LOGGER.info("Sent WORLD_SAVE_AND_EXIT_COMPLETE to MineBackup main program (singleplayer).");
-                    }).start();
-                }
-            });
+            handlePreHotRestore(eventData);
             return;
         }
-
         if ("restore_finished".equals(eventType) || "restore_success".equals(eventType)) {
-            String status = "restore_success".equals(eventType) ? "success" : eventData.getOrDefault("status", "success");
-            if ("success".equals(status)) {
-                String worldFromEvent = eventData.get("world");
-                if (isValidLevelId(worldFromEvent)) {
-                    String fallbackLevelId = worldFromEvent.trim();
-                    if (!isValidLevelId(HotRestoreState.levelIdToRejoin)) {
-                        HotRestoreState.levelIdToRejoin = fallbackLevelId;
-                    }
-                    if (!isValidLevelId(MineBackupClient.worldToRejoin)) {
-                        MineBackupClient.worldToRejoin = fallbackLevelId;
-                    }
-                }
-                MineBackupClient.readyToRejoin = false;
-                if (HotRestoreState.levelIdToRejoin != null && MineBackupClient.worldToRejoin == null) {
-                    MineBackupClient.worldToRejoin = HotRestoreState.levelIdToRejoin;
-                }
-                HotRestoreState.waitingForServerStopAck = false;
-                MineBackupClient.showRestoreSuccessOverlay();
-                LOGGER.info("还原成功，等待 rejoin_world 事件后再执行重连");
-            } else {
-                LOGGER.warn("主程序报告还原失败，status={}", status);
-                MineBackupClient.readyToRejoin = false;
-                HotRestoreState.reset();
-            }
+            handleRestoreFinished(eventData, eventType);
             return;
         }
-
         if ("rejoin_world".equals(eventType)) {
-            LOGGER.info("收到 rejoin_world 事件，触发客户端重连");
-            String worldFromEvent = eventData.get("world");
-            if (isValidLevelId(worldFromEvent)) {
-                String fallbackLevelId = worldFromEvent.trim();
-                if (!isValidLevelId(HotRestoreState.levelIdToRejoin)) {
-                    HotRestoreState.levelIdToRejoin = fallbackLevelId;
-                }
-                if (!isValidLevelId(MineBackupClient.worldToRejoin)) {
-                    MineBackupClient.worldToRejoin = fallbackLevelId;
-                }
-            }
-            if (HotRestoreState.levelIdToRejoin != null && MineBackupClient.worldToRejoin == null) {
-                MineBackupClient.worldToRejoin = HotRestoreState.levelIdToRejoin;
-            }
-            if (!MineBackupClient.readyToRejoin) {
-                if (isValidLevelId(MineBackupClient.worldToRejoin)) {
-                    MineBackupClient.readyToRejoin = true;
-                } else {
-                    LOGGER.warn("rejoin_world 事件缺少有效 world，发送 REJOIN_RESULT failure invalid_level_id");
-                    OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure invalid_level_id");
-                }
-            }
-            HotRestoreState.waitingForServerStopAck = false;
+            handleRejoinWorld(eventData);
             return;
         }
 
-        final Component message = switch (eventType) {
+        if ("pre_hot_backup".equals(eventType)) {
+            serverInstance.execute(() -> {
+                String worldName = serverInstance.getWorldData().getLevelName();
+                serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.request", worldName), false);
+                boolean allSaved = LocalSaveCoordinator.saveForLocalCommand(serverInstance);
+                if (!allSaved) {
+                    serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.warn", worldName), false);
+                }
+                freezeAutoSave(serverInstance);
+                serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.complete"), false);
+                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVED");
+            });
+        }
+
+        if (("backup_success".equals(eventType) || "backup_failed".equals(eventType)) && saveFrozen) {
+            serverInstance.execute(() -> {
+                unfreezeAutoSave(serverInstance);
+                serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.autosave.resumed"), false);
+            });
+        }
+
+        Component message = switch (eventType) {
             case "backup_started" -> Component.translatable("minebackup.broadcast.backup.started", getWorldDisplay(eventData));
             case "restore_started" -> Component.translatable("minebackup.broadcast.restore.started", getWorldDisplay(eventData));
             case "backup_success" -> Component.translatable("minebackup.broadcast.backup.success", getWorldDisplay(eventData), getFileDisplay(eventData));
@@ -464,83 +350,153 @@ public class MineBackup {
             default -> null;
         };
 
-        if ("pre_hot_backup".equals(eventType)) {
-            serverInstance.execute(() -> {
-                LOGGER.info("Executing immediate save for pre_hot_backup event.");
-                String worldName = serverInstance.getWorldData().getLevelName();
-                serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.request", worldName), false);
-                boolean allSaved = saveAllDataForHotBackup(serverInstance);
-                if (!allSaved) {
-                    LOGGER.warn("One or more levels failed to save during pre_hot_backup for world: {}", worldName);
-                    serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.warn", worldName), false);
-                }
-                freezeAutoSave(serverInstance);
-
-                LOGGER.info("World saved and auto-save frozen for hot backup.");
-                serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.hot_backup.complete"), false);
-                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVED");
-                LOGGER.info("Sent WORLD_SAVED notification to MineBackup main program.");
-            });
-        } else if ("game_session_start".equals(eventType)) {
-            LOGGER.info("MineBackup detected game session start for world: {}", getWorldDisplay(eventData).getString());
-        }
-
-        // 备份完成后恢复自动保存
-        if ("backup_success".equals(eventType) || "backup_failed".equals(eventType)) {
-            if (saveFrozen) {
-                serverInstance.execute(() -> {
-                    unfreezeAutoSave(serverInstance);
-                    LOGGER.info("Backup finished (event={}), auto-save unfrozen.", eventType);
-                    serverInstance.getPlayerList().broadcastSystemMessage(
-                            Component.translatable("minebackup.broadcast.autosave.resumed"), false);
-                });
-            }
-        }
-
         if (message != null) {
             serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(message, false));
         }
     }
 
-    public static void freezeAutoSave(MinecraftServer server) {
-        if (saveFrozen) {
-            LOGGER.warn("[Freeze] Auto-save already frozen, skipping.");
+    private void handleHandshake(Map<String, String> eventData) {
+        String mainVersion = eventData.get("version");
+        String minModVersion = eventData.get("min_mod_version");
+        String displayMainVersion = mainVersion != null ? mainVersion : "?";
+
+        HotRestoreState.mainProgramVersion = mainVersion;
+        HotRestoreState.handshakeCompleted = true;
+        HotRestoreState.requiredMinModVersion = minModVersion;
+        HotRestoreState.versionCompatible = isVersionCompatible(MOD_VERSION, minModVersion);
+
+        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "HANDSHAKE_RESPONSE " + MOD_VERSION);
+
+        if (!isVersionCompatible(mainVersion, MIN_MAIN_PROGRAM_VERSION)) {
+            serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(
+                    Component.translatable("minebackup.message.handshake.main_version_incompatible",
+                            displayMainVersion, MIN_MAIN_PROGRAM_VERSION),
+                    false));
             return;
         }
-        synchronized (frozenWorlds) {
-            frozenWorlds.clear();
-            for (ServerLevel level : server.getAllLevels()) {
-                if (level != null && !level.noSave) {
-                    level.noSave = true;
-                    frozenWorlds.add(level);
-                    LOGGER.info("[Freeze] Disabled auto-save for dimension: {}",
-                            level.dimension().location());
-                }
-            }
+
+        if (!HotRestoreState.versionCompatible) {
+            serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(
+                    Component.translatable("minebackup.message.handshake.version_incompatible",
+                            MOD_VERSION, minModVersion != null ? minModVersion : "?"),
+                    false));
+            return;
         }
-        saveFrozen = true;
-        freezeTimestamp = System.currentTimeMillis();
-        LOGGER.info("[Freeze] Auto-save frozen for {} dimensions.", frozenWorlds.size());
+
+        if (shouldBroadcastHandshakeSuccess(displayMainVersion)) {
+            serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(
+                    Component.translatable("minebackup.message.handshake.success", displayMainVersion),
+                    false));
+        }
     }
 
-    public static void unfreezeAutoSave(MinecraftServer server) {
-        if (!saveFrozen) {
-            LOGGER.warn("[Unfreeze] Auto-save not frozen, skipping.");
-            return;
-        }
-        synchronized (frozenWorlds) {
-            for (ServerLevel level : frozenWorlds) {
-                if (level != null && level.noSave) {
-                    level.noSave = false;
-                    LOGGER.info("[Unfreeze] Re-enabled auto-save for dimension: {}",
-                            level.dimension().location());
+    private void handlePreHotRestore(Map<String, String> eventData) {
+        serverInstance.execute(() -> {
+            serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.message.restore.preparing"), false);
+            HotRestoreState.isRestoring = true;
+            HotRestoreState.waitingForServerStopAck = true;
+
+            if (serverInstance.isDedicatedServer()) {
+                LocalSaveCoordinator.saveForLocalCommand(serverInstance);
+                Component kickMessage = Component.translatable("minebackup.message.restore.kick");
+                for (ServerPlayer player : serverInstance.getPlayerList().getPlayers().toArray(new ServerPlayer[0])) {
+                    try {
+                        player.connection.disconnect(kickMessage);
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to disconnect player: {}", e.getMessage());
+                    }
+                }
+                new Thread(() -> {
+                    sleepQuietly(500L);
+                    OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVE_AND_EXIT_COMPLETE");
+                }).start();
+                serverInstance.stopServer();
+                return;
+            }
+
+            String levelId = resolveRejoinLevelId(serverInstance, eventData.get("world"));
+            MineBackupClient.setWorldToRejoin(levelId);
+            HotRestoreState.levelIdToRejoin = levelId;
+            LocalSaveCoordinator.saveForLocalCommand(serverInstance);
+
+            Component kickMessage = Component.translatable("minebackup.message.restore.kick");
+            for (ServerPlayer player : serverInstance.getPlayerList().getPlayers().toArray(new ServerPlayer[0])) {
+                try {
+                    player.connection.disconnect(kickMessage);
+                } catch (Exception e) {
+                    LOGGER.warn("Failed to disconnect player: {}", e.getMessage());
                 }
             }
-            frozenWorlds.clear();
+
+            new Thread(() -> {
+                sleepQuietly(400L);
+                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVE_AND_EXIT_COMPLETE");
+            }).start();
+        });
+    }
+
+    private void handleRestoreFinished(Map<String, String> eventData, String eventType) {
+        String status = "restore_success".equals(eventType) ? "success" : eventData.getOrDefault("status", "success");
+        if (!"success".equals(status)) {
+            MineBackupClient.clearReadyToRejoin();
+            MineBackupClient.resetRestoreState();
+            return;
         }
-        saveFrozen = false;
-        freezeTimestamp = 0;
-        LOGGER.info("[Unfreeze] Auto-save unfrozen.");
+
+        String worldFromEvent = eventData.get("world");
+        if (isValidLevelId(worldFromEvent)) {
+            String fallbackLevelId = worldFromEvent.trim();
+            if (!isValidLevelId(HotRestoreState.levelIdToRejoin)) {
+                HotRestoreState.levelIdToRejoin = fallbackLevelId;
+            }
+            if (!isValidLevelId(MineBackupClient.getWorldToRejoin())) {
+                MineBackupClient.setWorldToRejoin(fallbackLevelId);
+            }
+        }
+
+        MineBackupClient.clearReadyToRejoin();
+        if (HotRestoreState.levelIdToRejoin != null && MineBackupClient.getWorldToRejoin() == null) {
+            MineBackupClient.setWorldToRejoin(HotRestoreState.levelIdToRejoin);
+        }
+        HotRestoreState.waitingForServerStopAck = false;
+        MineBackupClient.showRestoreSuccessOverlay();
+    }
+
+    private void handleRejoinWorld(Map<String, String> eventData) {
+        String worldFromEvent = eventData.get("world");
+        if (isValidLevelId(worldFromEvent)) {
+            String fallbackLevelId = worldFromEvent.trim();
+            if (!isValidLevelId(HotRestoreState.levelIdToRejoin)) {
+                HotRestoreState.levelIdToRejoin = fallbackLevelId;
+            }
+            if (!isValidLevelId(MineBackupClient.getWorldToRejoin())) {
+                MineBackupClient.setWorldToRejoin(fallbackLevelId);
+            }
+        }
+
+        if (HotRestoreState.levelIdToRejoin != null && MineBackupClient.getWorldToRejoin() == null) {
+            MineBackupClient.setWorldToRejoin(HotRestoreState.levelIdToRejoin);
+        }
+
+        if (!MineBackupClient.isReadyToRejoin()) {
+            if (isValidLevelId(MineBackupClient.getWorldToRejoin())) {
+                MineBackupClient.markReadyToRejoin();
+            } else {
+                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure invalid_level_id");
+            }
+        }
+        HotRestoreState.waitingForServerStopAck = false;
+    }
+
+    private void checkFreezeTimeout() {
+        if (!saveFrozen || serverInstance == null || !FreezeWatchdog.hasTimedOut(freezeTimestamp)) {
+            return;
+        }
+
+        long elapsed = FreezeWatchdog.elapsedSince(freezeTimestamp);
+        LOGGER.error("Auto-save freeze timed out after {}ms, forcing resume.", elapsed);
+        unfreezeAutoSave(serverInstance);
+        serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.broadcast.autosave.timeout"), false);
     }
 
     private static boolean shouldBroadcastHandshakeSuccess(String mainVersion) {
@@ -553,41 +509,6 @@ public class MineBackup {
         }
     }
 
-    private void checkFreezeTimeout() {
-        if (saveFrozen && freezeTimestamp > 0) {
-            long elapsed = System.currentTimeMillis() - freezeTimestamp;
-            if (elapsed > FREEZE_TIMEOUT_MS) {
-                LOGGER.error("[Safety] Auto-save freeze timed out after {}ms! Force unfreezing.", elapsed);
-                if (serverInstance != null) {
-                    unfreezeAutoSave(serverInstance);
-                    serverInstance.getPlayerList().broadcastSystemMessage(
-                            Component.translatable("minebackup.broadcast.autosave.timeout"), false);
-                }
-            }
-        }
-    }
-
-    public static boolean isSaveFrozen() {
-        return saveFrozen;
-    }
-
-    public static boolean isVersionCompatible(String current, String required) {
-        if (required == null || required.isBlank()) return true;
-        if (current == null || current.isBlank()) return false;
-        try {
-            int[] c = parseVersionParts(current);
-            int[] r = parseVersionParts(required);
-            for (int i = 0; i < 3; i++) {
-                if (c[i] > r[i]) return true;
-                if (c[i] < r[i]) return false;
-            }
-            return true;
-        } catch (Exception e) {
-            LOGGER.warn("版本号解析失败: current={}, required={}", current, required);
-            return false;
-        }
-    }
-
     private static int[] parseVersionParts(String version) {
         String[] parts = version.split("\\.");
         int[] result = new int[3];
@@ -595,5 +516,13 @@ public class MineBackup {
             result[i] = Integer.parseInt(parts[i].trim());
         }
         return result;
+    }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

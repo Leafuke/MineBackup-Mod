@@ -193,6 +193,7 @@ def replaceProperties = [
 ]
 processResources {
     inputs.properties replaceProperties
+    filteringCharset = 'UTF-8'
     replaceProperties.put 'project', project
 
     filesMatching(resourceTargets) {
