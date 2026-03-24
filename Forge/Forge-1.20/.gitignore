@@ -1,6 +1,3 @@
-# 默认忽略的文件
-/shelf/
-/workspace.xml
 # eclipse
 bin
 *.launch
@@ -14,9 +11,7 @@ out
 *.ipr
 *.iws
 *.iml
-*.idea
-*.zip
-*.7z
+.idea
 
 # gradle
 build
@@ -25,11 +20,6 @@ build
 # other
 eclipse
 run
-*.log
-*.txt
-*.jar
-*.yml
-*.xml
 
 # Files from Forge MDK
 forge*changelog.txt

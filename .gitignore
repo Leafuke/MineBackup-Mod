@@ -1,47 +1,66 @@
-# eclipse
-bin
-*.launch
-.settings
-.metadata
-.classpath
-.project
-
-# idea
-out
+# IDE and editor files
+.idea/
+out/
+*.iml
 *.ipr
 *.iws
-*.iml
-.idea
+.settings/
+.metadata/
+.classpath
+.project
+bin/
+*.launch
+.DS_Store
 
-# gradle
-build
-.gradle
+# Gradle and build outputs
+.gradle/
+build/
+classes/
+run/
+runs/
+run-data/
+eclipse/
 
-# other
-eclipse
-run
+# Logs and JVM crash dumps
+*.log
+hs_err_*.log
+replay_*.log
+*.hprof
+*.jfr
 
-# Files from Forge MDK
-forge*changelog.txt
-
-
-*.txt
+# Local archives and helper scripts
 *.zip
 *.7z
 *.jar
-*.log
 *.bat
-/Reference
-/.idea
-/Fabric/Fabric-1.18
-/Fabric/Fabric-1.19
-/Fabric/Fabric-1.20.x
-/Fabric/Fabric-1.21.x
-/forge/forge-1.12.2
-/forge/forge-1.16.5
-/forge/forge-1.18.2
-/forge/forge-1.20.1
-!/.gitignore
-!/.gitattributes
-.gitignore
-.gitattributes
+
+# Keep the maintained Gradle wrappers in version control
+!/Fabric/Fabric-1.21/gradlew.bat
+!/Fabric/Fabric-1.21/gradle/wrapper/gradle-wrapper.jar
+!/Fabric/Fabric-1.21.11/gradlew.bat
+!/Fabric/Fabric-1.21.11/gradle/wrapper/gradle-wrapper.jar
+!/Neoforge/NeoForge-1.21/gradlew.bat
+!/Neoforge/NeoForge-1.21/gradle/wrapper/gradle-wrapper.jar
+!/Forge/Forge-1.20/gradlew.bat
+!/Forge/Forge-1.20/gradle/wrapper/gradle-wrapper.jar
+
+# External references and local downloads
+/Reference/
+/Documentation-main (1).zip
+/fabric-docs-main (1).zip
+/Neoforge/NeoForge-1.21/TEMPLATE_LICENSE.txt
+/Forge/Forge-1.20/CREDITS.txt
+/Forge/Forge-1.20/README.txt
+/Forge/Forge-1.20/changelog.txt
+
+# Unmanaged version trees
+/Fabric/Fabric-1.18/
+/Fabric/Fabric-1.19/
+/Fabric/Fabric-1.20/
+/Fabric/Fabric-1.20.x/
+/Fabric/Fabric-1.21.x/
+/Forge/forge-1.12.2/
+/Forge/forge-1.12.2-14.23.5.2859-mdk/
+/Forge/forge-1.16.5/
+/Forge/forge-1.18.2/
+/Forge/forge-1.20.1/

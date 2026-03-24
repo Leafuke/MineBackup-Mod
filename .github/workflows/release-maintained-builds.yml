@@ -1,0 +1,177 @@
+name: Release Maintained Builds
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Resolve shared version
+    runs-on: ubuntu-24.04
+    outputs:
+      mod_version: ${{ steps.version.outputs.mod_version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      release_name: ${{ steps.version.outputs.release_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read maintained project versions
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          files=(
+            "Fabric/Fabric-1.21/gradle.properties"
+            "Fabric/Fabric-1.21.11/gradle.properties"
+            "Neoforge/NeoForge-1.21/gradle.properties"
+            "Forge/Forge-1.20/gradle.properties"
+          )
+
+          versions=()
+
+          for file in "${files[@]}"; do
+            version="$(grep -E '^mod_version=' "$file" | head -n 1 | cut -d '=' -f 2- | tr -d '\r')"
+            if [ -z "$version" ]; then
+              echo "::error file=$file::mod_version not found"
+              exit 1
+            fi
+            versions+=("$version")
+          done
+
+          mapfile -t unique_versions < <(printf '%s\n' "${versions[@]}" | sort -u)
+
+          if [ "${#unique_versions[@]}" -ne 1 ]; then
+            echo "::error::All maintained projects must share the same mod_version."
+            for idx in "${!files[@]}"; do
+              echo "::error file=${files[$idx]}::Detected mod_version=${versions[$idx]}"
+            done
+            exit 1
+          fi
+
+          mod_version="${unique_versions[0]}"
+
+          echo "mod_version=$mod_version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$mod_version" >> "$GITHUB_OUTPUT"
+          echo "release_name=MineBackup v$mod_version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.id }}
+    needs: preflight
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: fabric-1.21
+            loader: fabric
+            minecraft: 1.21
+            java: '21'
+            project_dir: Fabric/Fabric-1.21
+          - id: fabric-1.21.11
+            loader: fabric
+            minecraft: 1.21.11
+            java: '21'
+            project_dir: Fabric/Fabric-1.21.11
+          - id: neoforge-1.21
+            loader: neoforge
+            minecraft: 1.21
+            java: '21'
+            project_dir: Neoforge/NeoForge-1.21
+          - id: forge-1.20
+            loader: forge
+            minecraft: 1.20
+            java: '17'
+            project_dir: Forge/Forge-1.20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        shell: bash
+        run: chmod +x "${{ matrix.project_dir }}/gradlew"
+
+      - name: Build mod
+        working-directory: ${{ matrix.project_dir }}
+        shell: bash
+        run: ./gradlew build --no-daemon
+
+      - name: Prepare release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          project_dir="${{ matrix.project_dir }}"
+          release_dir="$GITHUB_WORKSPACE/release-assets"
+          artifact_name="minebackup-${{ matrix.loader }}-${{ matrix.minecraft }}-${{ needs.preflight.outputs.mod_version }}.jar"
+
+          mkdir -p "$release_dir"
+
+          mapfile -t jars < <(find "$project_dir/build/libs" -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' ! -name '*-dev.jar')
+
+          if [ "${#jars[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one releasable jar in $project_dir/build/libs, found ${#jars[@]}"
+            printf '%s\n' "${jars[@]}"
+            exit 1
+          fi
+
+          cp "${jars[0]}" "$release_dir/$artifact_name"
+
+      - name: Upload release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.id }}
+          path: release-assets/*.jar
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs:
+      - preflight
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download built assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+          RELEASE_NAME: ${{ needs.preflight.outputs.release_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists. Refreshing assets."
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_NAME" \
+              --target "$GITHUB_SHA" \
+              --generate-notes
+          fi
+
+          gh release upload "$RELEASE_TAG" release-assets/*.jar --repo "$GITHUB_REPOSITORY" --clobber
