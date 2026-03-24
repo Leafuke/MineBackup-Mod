@@ -75,6 +75,11 @@
   "minebackup.message.freeze.success": "§a已冻结自动保存，可开始外部备份。",
   "minebackup.message.freeze.already": "§7自动保存已处于冻结状态。",
   "minebackup.message.unfreeze.success": "§7自动保存已恢复。",
-  "minebackup.message.unfreeze.already": "§7自动保存未被冻结。"
+  "minebackup.message.unfreeze.already": "§7自动保存未被冻结。",
+  "minebackup.message.plugin_required": "§6[MineBackup] 专用服务器场景请改用 MineBackup 联动插件。",
+  "minebackup.message.plugin_link_prefix": "§7插件说明与下载入口：",
+  "minebackup.message.plugin_link_hover": "打开 MineBackup 插件页面",
+  "minebackup.message.update.available": "§e[MineBackup] 检测到新版本：§f%s§e，点击打开发布页。",
+  "minebackup.message.update.hover": "打开最新的 MineBackup-Mod 发布页"
 }
 

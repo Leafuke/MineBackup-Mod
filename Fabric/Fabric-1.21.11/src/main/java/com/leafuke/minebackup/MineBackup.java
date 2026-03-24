@@ -29,6 +29,7 @@ import net.minecraft.server.level.ServerLevel;
 public class MineBackup implements ModInitializer {
 
     public static final String MOD_ID = "minebackup";
+    public static final String PLUGIN_GUIDE_URL = "https://github.com/Leafuke/MineBackup-Mod";
     // KnotLink 协议版本号，用于与主程序握手时进行版本兼容性检查
     public static final String MOD_VERSION = "1.1.2";
     private static final String MIN_MAIN_PROGRAM_VERSION = "1.14.0";
@@ -76,19 +77,26 @@ public class MineBackup implements ModInitializer {
      */
     private void registerServerLifecycleEvents() {
         ServerLifecycleEvents.SERVER_STARTING.register(server -> {
+            serverInstance = server;
+            lastHandshakeSuccessVersion = null;
+            if (server.isDedicatedServer()) {
+                LOGGER.info("MineBackup mod is running on a dedicated server. Dedicated workflows are delegated to the plugin.");
+                if (knotLinkSubscriber != null) {
+                    knotLinkSubscriber.stop();
+                    knotLinkSubscriber = null;
+                }
+                return;
+            }
             if (knotLinkSubscriber == null) {
                 LOGGER.info("[MineBackup] 服务器正在启动，正在初始化 KnotLink 订阅器...");
-                serverInstance = server;
                 knotLinkSubscriber = new SignalSubscriber(BROADCAST_APP_ID, BROADCAST_SIGNAL_ID);
                 knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
                 new Thread(knotLinkSubscriber::start).start();
             } else {
                 LOGGER.info("[MineBackup] 服务器正在启动，KnotLink 订阅器已存在...");
-                serverInstance = server;
                 knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
             }
 
-            lastHandshakeSuccessVersion = null;
             // 加载配置并启动自动备份（如果配置了的话）
             Config.load();
             if (Config.hasAutoBackup()) {
@@ -105,13 +113,10 @@ public class MineBackup implements ModInitializer {
                 unfreezeAutoSave(server);
             }
 
-            // 仅在专用服务器上停止订阅器
-            if (server.isDedicatedServer()) {
-                if (knotLinkSubscriber != null) {
-                    knotLinkSubscriber.stop();
-                    knotLinkSubscriber = null;
-                    LOGGER.info("[MineBackup] 服务器停止，已关闭 KnotLink 订阅器。");
-                }
+            if (knotLinkSubscriber != null) {
+                knotLinkSubscriber.stop();
+                knotLinkSubscriber = null;
+                LOGGER.info("[MineBackup] 服务器停止，已关闭 KnotLink 订阅器。");
             }
         });
     }
@@ -280,6 +285,10 @@ public class MineBackup implements ModInitializer {
      */
     private void handleBroadcastEvent(String payload) {
         if (serverInstance == null) return;
+        if (serverInstance.isDedicatedServer()) {
+            LOGGER.info("Ignoring backend broadcast on dedicated server: {}", payload);
+            return;
+        }
         checkFreezeTimeout();
 
         // 处理远程保存命令

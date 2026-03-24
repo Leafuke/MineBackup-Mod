@@ -29,6 +29,7 @@ import net.minecraft.server.level.ServerLevel;
 public class MineBackup {
 
     public static final String MOD_ID = "minebackup";
+    public static final String PLUGIN_GUIDE_URL = "https://github.com/Leafuke/MineBackup-Mod";
     public static final String MOD_VERSION = "1.1.2";
     private static final String MIN_MAIN_PROGRAM_VERSION = "1.14.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -67,19 +68,26 @@ public class MineBackup {
 
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent event) {
+        serverInstance = event.getServer();
+        lastHandshakeSuccessVersion = null;
+        if (event.getServer().isDedicatedServer()) {
+            LOGGER.info("MineBackup mod is running on a dedicated server. Dedicated workflows are delegated to the plugin.");
+            if (knotLinkSubscriber != null) {
+                knotLinkSubscriber.stop();
+                knotLinkSubscriber = null;
+            }
+            return;
+        }
         if (knotLinkSubscriber == null) {
             LOGGER.info("MineBackup Mod: Server is starting, initializing KnotLink Subscriber...");
-            serverInstance = event.getServer();
             knotLinkSubscriber = new SignalSubscriber(BROADCAST_APP_ID, BROADCAST_SIGNAL_ID);
             knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
             new Thread(knotLinkSubscriber::start).start();
         } else {
             LOGGER.info("MineBackup Mod: Server is starting, KnotLink Subscriber has been here...");
-            serverInstance = event.getServer();
             knotLinkSubscriber.setSignalListener(this::handleBroadcastEvent);
         }
 
-        lastHandshakeSuccessVersion = null;
         Config.load();
         if (Config.hasAutoBackup()) {
             String cmd = String.format("AUTO_BACKUP %d %d %d", Config.getConfigId(), Config.getWorldIndex(), Config.getInternalTime());
@@ -96,12 +104,10 @@ public class MineBackup {
             unfreezeAutoSave();
         }
 
-        if (event.getServer().isDedicatedServer()) {
-            if (knotLinkSubscriber != null) {
-                knotLinkSubscriber.stop();
-                knotLinkSubscriber = null;
-                LOGGER.info("MineBackup Mod: Server stopping, stopped KnotLink Subscriber.");
-            }
+        if (knotLinkSubscriber != null) {
+            knotLinkSubscriber.stop();
+            knotLinkSubscriber = null;
+            LOGGER.info("MineBackup Mod: Server stopping, stopped KnotLink Subscriber.");
         }
     }
 
@@ -237,6 +243,10 @@ public class MineBackup {
 
     private void handleBroadcastEvent(String payload) {
         if (serverInstance == null) return;
+        if (serverInstance.isDedicatedServer()) {
+            LOGGER.info("Ignoring backend broadcast on dedicated server: {}", payload);
+            return;
+        }
 
         // 检查冻结超时
         checkFreezeTimeout();
@@ -571,4 +581,3 @@ public class MineBackup {
         return saveFrozen;
     }
 }
-

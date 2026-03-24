@@ -10,9 +10,14 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.gui.screen.world.SelectWorldScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.text.ClickEvent;
+import net.minecraft.text.HoverEvent;
+import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 
 public class MineBackupClient implements ClientModInitializer {
+    private static final UpdateChecker UPDATE_CHECKER = new UpdateChecker();
+    private static boolean updatePromptShown = false;
     // 用于在客户端会话中暂存需要自动重连的世界ID（对应存档文件夹名）
     public static volatile String worldToRejoin = null;
     public static volatile boolean readyToRejoin = false;
@@ -40,10 +45,12 @@ public class MineBackupClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         MineBackup.LOGGER.info("MineBackup client initialized for Fabric 1.21 (Yarn)");
+        UPDATE_CHECKER.start();
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
     }
 
     private void onClientTick(MinecraftClient client) {
+        tryShowUpdateMessage(client);
         // ========== 检测世界重连是否已成功完成 ==========
         if (waitingForRejoinCompletion) {
             if (client.world != null) {
@@ -227,6 +234,23 @@ public class MineBackupClient implements ClientModInitializer {
         waitingForRejoinCompletion = false;
         rejoinCompletionTimeoutTicks = 0;
         HotRestoreState.reset();
+    }
+
+    private void tryShowUpdateMessage(MinecraftClient client) {
+        if (updatePromptShown || client == null || client.player == null || client.world == null) {
+            return;
+        }
+        if (!UPDATE_CHECKER.needUpdate || UPDATE_CHECKER.latestVersion == null || UPDATE_CHECKER.latestReleaseUrl == null) {
+            return;
+        }
+
+        MutableText message = Text.translatable("minebackup.message.update.available", UPDATE_CHECKER.latestVersion)
+                .styled(style -> style
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, UPDATE_CHECKER.latestReleaseUrl))
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                Text.translatable("minebackup.message.update.hover"))));
+        client.player.sendMessage(message, false);
+        updatePromptShown = true;
     }
 
     public static void showRestoreSuccessOverlay() {

@@ -7,7 +7,10 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
@@ -16,6 +19,8 @@ import java.lang.reflect.Method;
 import java.util.Optional;
 
 public class MineBackupClient {
+    private static final UpdateChecker UPDATE_CHECKER = new UpdateChecker();
+    private static boolean updatePromptShown = false;
 
     public static volatile String worldToRejoin = null;
     public static volatile boolean readyToRejoin = false;
@@ -39,12 +44,14 @@ public class MineBackupClient {
     // 由主类调用的静态初始化方法
     public static void initialize() {
         // 将这个类的实例注册到事件总线，以便 @SubscribeEvent 能工作
+        UPDATE_CHECKER.start();
         NeoForge.EVENT_BUS.register(new MineBackupClient());
     }
 
     @SubscribeEvent
     public void onClientTick(ClientTickEvent.Post event) {
         Minecraft client = Minecraft.getInstance();
+        tryShowUpdateMessage(client);
 
         if (waitingForRejoinCompletion) {
             if (client.level != null) {
@@ -207,6 +214,23 @@ public class MineBackupClient {
         waitingForRejoinCompletion = false;
         rejoinCompletionTimeoutTicks = 0;
         HotRestoreState.reset();
+    }
+
+    private void tryShowUpdateMessage(Minecraft client) {
+        if (updatePromptShown || client == null || client.player == null || client.level == null) {
+            return;
+        }
+        if (!UPDATE_CHECKER.needUpdate || UPDATE_CHECKER.latestVersion == null || UPDATE_CHECKER.latestReleaseUrl == null) {
+            return;
+        }
+
+        MutableComponent message = Component.translatable("minebackup.message.update.available", UPDATE_CHECKER.latestVersion)
+                .withStyle(style -> style
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, UPDATE_CHECKER.latestReleaseUrl))
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                Component.translatable("minebackup.message.update.hover"))));
+        client.player.sendSystemMessage(message);
+        updatePromptShown = true;
     }
 
     public static void showRestoreSuccessOverlay() {

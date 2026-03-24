@@ -10,6 +10,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 /**
  * MineBackup 客户端初始化器（Fabric 1.21.11+，使用 Mojang 官方映射）
@@ -18,6 +19,8 @@ import net.minecraft.network.chat.Component;
  * 参考 QuickBackupM-Reforged 的实现方式进行优化
  */
 public class MineBackupClient implements ClientModInitializer {
+    private static final UpdateChecker UPDATE_CHECKER = new UpdateChecker();
+    private static boolean updatePromptShown = false;
 
     // 用于在客户端会话中暂存需要自动重连的世界ID（对应存档文件夹名）
     public static volatile String worldToRejoin = null;
@@ -50,6 +53,7 @@ public class MineBackupClient implements ClientModInitializer {
         MineBackup.LOGGER.info("[MineBackup] 客户端初始化完成 (Fabric 1.21.11+)");
 
         // 注册客户端tick事件，用于监听还原完成信号并自动重连
+        UPDATE_CHECKER.start();
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
     }
 
@@ -58,6 +62,7 @@ public class MineBackupClient implements ClientModInitializer {
      * 负责监听还原完成信号并执行自动重连流程
      */
     private void onClientTick(Minecraft client) {
+        tryShowUpdateMessage(client);
         // ========== 检测世界重连是否已成功完成 ==========
         if (waitingForRejoinCompletion) {
             if (client.level != null) {
@@ -267,6 +272,23 @@ public class MineBackupClient implements ClientModInitializer {
         waitingForRejoinCompletion = false;
         rejoinCompletionTimeoutTicks = 0;
         HotRestoreState.reset();
+    }
+
+    private void tryShowUpdateMessage(Minecraft client) {
+        if (updatePromptShown || client == null || client.player == null || client.level == null) {
+            return;
+        }
+        if (!UPDATE_CHECKER.needUpdate || UPDATE_CHECKER.latestVersion == null || UPDATE_CHECKER.latestReleaseUrl == null) {
+            return;
+        }
+
+        MutableComponent message = Component.translatable("minebackup.message.update.available", UPDATE_CHECKER.latestVersion)
+                .withStyle(style -> style
+                        .withClickEvent(new net.minecraft.network.chat.ClickEvent.OpenUrl(java.net.URI.create(UPDATE_CHECKER.latestReleaseUrl)))
+                        .withHoverEvent(new net.minecraft.network.chat.HoverEvent.ShowText(
+                                Component.translatable("minebackup.message.update.hover"))));
+        client.gui.getChat().addMessage(message);
+        updatePromptShown = true;
     }
 
     public static void showRestoreSuccessOverlay() {

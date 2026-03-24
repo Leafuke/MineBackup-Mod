@@ -75,6 +75,11 @@
   "minebackup.message.freeze.success": "§aAutosave frozen. External backup can start now.",
   "minebackup.message.freeze.already": "§7Autosave is already frozen.",
   "minebackup.message.unfreeze.success": "§7Autosave resumed.",
-  "minebackup.message.unfreeze.already": "§7Autosave was not frozen."
+  "minebackup.message.unfreeze.already": "§7Autosave was not frozen.",
+  "minebackup.message.plugin_required": "§6[MineBackup] Dedicated server workflows are handled by the MineBackup plugin.",
+  "minebackup.message.plugin_link_prefix": "§7Install or learn about the plugin here: ",
+  "minebackup.message.plugin_link_hover": "Open the MineBackup plugin page",
+  "minebackup.message.update.available": "§e[MineBackup] A newer version is available: §f%s§e. Click to open releases.",
+  "minebackup.message.update.hover": "Open the latest MineBackup-Mod release"
 }
 
