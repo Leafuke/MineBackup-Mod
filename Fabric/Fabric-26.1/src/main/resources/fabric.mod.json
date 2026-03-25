@@ -3,7 +3,7 @@
 	"id": "minebackup",
 	"version": "${version}",
 	"name": "MineBackup",
-	"description": "MineBackup Linking Mod",
+	"description": "MineBackup Linking Mod - 与 MineBackup 主程序联动的存档备份模组",
 	"authors": [
 		"Leafuke"
 	],
@@ -14,21 +14,18 @@
 	"license": "MIT",
 	"icon": "assets/minebackup/icon.png",
 	"environment": "*",
-    "entrypoints": {
-      "main": [
-        "com.leafuke.minebackup.MineBackup"
-      ],
-      "client": [
-        "com.leafuke.minebackup.MineBackupClient"
-      ]
-    },
-	"depends": {
-		"fabricloader": ">=0.17.3",
-		"minecraft": ">=1.21 <1.21.11",
-		"java": ">=21",
-		"fabric-api": "*"
+	"entrypoints": {
+		"main": [
+			"com.leafuke.minebackup.MineBackup"
+		],
+		"client": [
+			"com.leafuke.minebackup.MineBackupClient"
+		]
 	},
-	"suggests": {
-		"another-mod": "*"
+	"depends": {
+		"fabricloader": ">=0.18.4",
+		"minecraft": "~26.1",
+		"java": ">=25",
+		"fabric-api": "*"
 	}
 }
