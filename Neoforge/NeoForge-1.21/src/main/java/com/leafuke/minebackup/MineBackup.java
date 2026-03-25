@@ -31,7 +31,7 @@ import java.util.Map;
 public class MineBackup {
     public static final String MOD_ID = "minebackup";
     public static final String PLUGIN_GUIDE_URL = "https://github.com/Leafuke/MineBackup-Mod";
-    public static final String MOD_VERSION = "1.1.2";
+    public static final String MOD_VERSION = "2.0.0";
     private static final String MIN_MAIN_PROGRAM_VERSION = "1.14.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
