@@ -14,9 +14,13 @@ Additionally, for proper inter-process communication, the KnotLink server must b
 
 **Exception**：Linux/MacOS users do not need to install the KnotLink server.
 
+### **⚠️ Important: Not for Dedicated Servers**
+
+Starting from version 2.0.0, this mod is only intended for Minecraft clients and integrated servers (single-player worlds). It no longer supports dedicated server environments. If you need backup and restore features on a dedicated server, please use the [MineBackup-Plugin](https://modrinth.com/plugin/minebackupplugin).
+
 ### **➡️ [Download the REQUIRED MineBackup Desktop Application Here](https://github.com/Leafuke/MineBackup/releases)**
 
-For Windows Users, recommend **FolderRewind** with plugin [MineRewind](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases)
+For Windows Users, recommend [FolderRewind](https://apps.microsoft.com/detail/9nwsdgxdqws4) with plugin [MineRewind](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases)
 
 <a href="https://apps.microsoft.com/detail/9nwsdgxdqws4?referrer=appbadge&mode=direct">
 	<img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200"/>
@@ -36,16 +40,13 @@ This lightweight Forge mod serves as a bridge between the powerful **MineBackup 
 
 ## 🚀 Installation Guide
 
-1.  **Download the Main Application**: Ensure you have downloaded the `MineBackup.exe` desktop application from the link above and that it runs correctly on your system.
-2.  **Download This Mod**: Get the version-matched `minebackup-x.x.x.jar` file from the **[Releases](https://github.com/Leafuke/MineBackup/releases)** page or other mod distribution platforms.
-3.  **Install the Mod**: Place the downloaded `.jar` file into your Minecraft client's `mods` folder.
-4.  **Run Simultaneously**: Launch your Minecraft game or server. For the mod to function, you **must have the `MineBackup`/`FolderRewind` desktop application running in the background while playing**.
-
-For step 1 to 2, you can also consider using **FolderRewind** with plugin **MineRewind** as an alternative. As follows:
-1. Download and install **FolderRewind** from Microsoft Store.
-2. Download the **MineRewind** plugin from [GitHub Releases](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases).
-3. Add the **MineRewind** plugin to FolderRewind.
-and then, the following steps are the same as above.
+1.  **Download the Main Application**: Ensure you have downloaded the `MineBackup`/`FolderRewind` desktop application from the link above and that it runs correctly on your system.
+2.  **Download MineRewind Plugin**: **If you use FolderRewind**, it is strongly recommended to install the MineRewind plugin and create a `Minecraft Saves` type configuration instead of `Default`. You can download this plugin from [GitHub Releases](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases).
+3.  **Download and Install KnotLink Server**: For inter-process communication, install the KnotLink server on your computer. You can download it from [GitHub Releases](https://github.com/hxh230802/KnotLink/releases).
+4.  **Enable KnotLink Service in the Main Application**: It is enabled by default in MineBackup but disabled by default in FolderRewind. If you use **FolderRewind**, enable it manually in settings.
+5.  **Download This Mod**: Get the version-matched `minebackup-x.x.x.jar` file from the **[Releases](https://github.com/Leafuke/MineBackup/releases)** page or other mod distribution platforms.
+6.  **Install the Mod**: Place the downloaded `.jar` file into your Minecraft client's `mods` folder.
+7.  **Run Simultaneously**: Launch your Minecraft game or server. For the mod to function, you **must have the `MineBackup`/`FolderRewind` desktop application running in the background while playing**.
 
 ## 📖 Command Reference
 
@@ -53,6 +54,8 @@ All commands require operator (OP) permissions for multiplayer servers. But for 
 
 | Command | Parameters | Description |
 | :--- | :--- | :--- |
+| **/mb quickbackup** | `[comment]` | Performs a backup for the current world. |
+| **/mb quickrestore** | `[filename]` | Performs a hot restore for the current world. If no filename is provided, it will automatically select the latest backup file. |
 | **/mb save** | (none) | Manually performs a full world save in-game, equivalent to `/save-all`. |
 | **/mb list_configs** | (none) | Lists all your configured backup profiles and their IDs from the MineBackup desktop application. |
 | **/mb list_worlds** | `<config_id>` | Lists all worlds under the specified configuration profile along with their indices. |
@@ -61,8 +64,6 @@ All commands require operator (OP) permissions for multiplayer servers. But for 
 | **/mb restore** | `<config_id> <world_index> <filename>` | Instructs the main application to restore the world using the specified backup file. Want to restore the current world? Use **/mb quickrestore** instead. |
 | **/mb auto** | `<config_id> <world_index> <internal_time>` | Requests MineBackup to start an automatic backup task, backing up every `internal_time` minutes. |
 | **/mb stop** | `<config_id> <world_index>` | Requests MineBackup to stop the automatic backup task. |
-| **/mb quicksave** | `[comment]` | Performs a backup for the current world. |
-| **/mb quickrestore** | `[filename]` | Performs a hot restore for the current world. If no filename is provided, it will automatically select the latest backup file. |
 
 ### **💡 Usage Example**
 
@@ -76,15 +77,13 @@ Let's say you want to create a backup for your server's main world:
 
 2.  **Step 2: Perform the Backup**
     * Now you know the config ID is `1` and the world index is `0`.
-    * Type `/mb backup 1 0 Preparing for Ender Dragon!`
+    * Type `/mb quickbackup Preparing for Ender Dragon!`
         > Chat returns: `[MineBackup] Backup task for world 'world' started...`
         > (After a moment)
         > `[MineBackup] Backup successful! World 'world' saved as [Full][2025-08-11_12-33-00]world [Preparing for Ender Dragon!].7z`
 
 3.  **(If Needed) Step 3: Perform a Restore**
-    * First, use `/mb list_backups 1 0` to list all backup files.
-    * Find the filename you want to restore, e.g., `[Full][2025-08-11_12-33-00]world [Preparing for Ender Dragon!].7z`.
-    * Execute `/mb restore 1 0 "[Full][2025-08-11_12-33-00]world [Preparing for Ender Dragon!].7z"`. (**Tip**: If the filename contains spaces, enclose it in double quotes `""`).
+    * Execute `/mb quickrestore "[Full][2025-08-11_12-33-00]world [Preparing for Ender Dragon!].7z"`. (**Tip**: Filename can be auto-completed).
 
 ## ❓ Frequently Asked Questions
 
