@@ -11,9 +11,9 @@
 并且为了程序间正常的通信，电脑上需要存在 KnotLink 服务端。https://github.com/hxh230802/KnotLink/releases
 **例外**：Linux/MacOS 用户无需安装 KnotLink 服务端。
 
-### **⚠️ 重要提示：不适用于专用服务端 **
+### **⚠️ 重要提示：专用服务端仅提供有限支持**
 
-自 2.0.0 版本开始，模组仅适用于 Minecraft 客户端和集成服务器（单人世界）。它不再支持专用服务端环境。如果您需要在专用服务端上使用备份与还原功能，请使用 [MineBackup-Plugin 联动插件](https://modrinth.com/plugin/minebackupplugin)。
+自 2.0.0 版本开始，模组对专用服务端提供有限支持。`/mb quickrestore`、`/mb restore` 等还原流程不支持专用服务端。如需在专用服务端使用指令执行还原，请使用 [MineBackupPlugin 联动插件](https://modrinth.com/plugin/minebackupplugin)。
 
 ### **➡️ [点此下载必需的 MineBackup 主程序](https://github.com/Leafuke/MineBackup/releases)**
 
@@ -42,23 +42,25 @@
 3.  **下载并安装 KnotLink 服务端**：为了实现程序间的通信，你需要在电脑上安装 KnotLink 服务端。你可以从 [GitHub Releases](https://github.com/hxh230802/KnotLink/releases) 下载。
 4.  **在主程序内启动 KnotLink服务**：MineBackup 默认开启，FolderRewind 默认关闭，如果你使用**后者**，需要手动在设置中开启。
 5.  **下载本模组**: 从 **[Releases](https://github.com/Leafuke/MineBackup/releases)** 或其他模组下载页面找到与主程序版本匹配的 `minebackup-x.x.x.jar` 文件。
-6.  **安装模组**: 将下载的 `.jar` 文件放入你的 Minecraft 客户端的 `mods` 文件夹中。
+6.  **安装模组**: 单机或局域网场景下，将下载的 `.jar` 文件放入 Minecraft 客户端的 `mods` 文件夹。专用服务端场景下，请安装到服务端的 `mods` 文件夹；客户端可选安装。
 7.  **同时运行**: 启动你的 Minecraft 游戏或服务器。为了让模组正常工作，请务必**在玩游戏的同时，让 `MineBackup`/`FolderRewind` 主程序在后台运行**。
 
 ## 📖 指令参考
 
 所有指令都需要管理员（OP）权限。特别地，对于单人存档，这些指令不需要OP权限。
 
+在专用服务端中，备份与查询类指令可用，但还原类指令仍需改用 MineBackupPlugin。
+
 | 指令 | 参数 | 描述 |
 | :--- | :--- | :--- |
 | **/mb quickbackup** | `[注释]` | 为当前世界执行备份 |
-| **/mb quickrestore** | `[文件名]` | 为当前世界执行热还原，不填写文件名则自动选择最新的备份文件 |
+| **/mb quickrestore** | `[文件名]` | 为当前世界执行热还原，不填写文件名则自动选择最新的备份文件。仅限单机/局域网，专用服务端请改用 MineBackupPlugin |
 | **/mb save** | (无) | 在游戏内手动执行一次完整的世界保存，效果等同于 `/save-all`。 |
 | **/mb list_configs** | (无) | 列出你在 MineBackup 主程序中设置的所有配置方案及其ID。 |
 | **/mb list_worlds** | `<config_id>` | 列出指定配置下的所有世界及其索引号（index）。 |
 | **/mb list_backups** | `<config_id> <world_index>` | 列出指定世界的所有可用备份文件。 |
 | **/mb backup** | `<config_id> <world_index> [注释]` | 命令主程序为指定世界创建一次备份。可以附上一段可选的注释。 |
-| **/mb restore** | `<config_id> <world_index> <文件名>` | 命令主程序用指定的备份文件来还原世界。如果你希望还原当前世界，务必使用 **/mb quickrestore** |
+| **/mb restore** | `<config_id> <world_index> <文件名>` | 命令主程序用指定的备份文件来还原世界。如果你希望还原当前世界，务必使用 **/mb quickrestore**。仅限单机/局域网，专用服务端请改用 MineBackupPlugin |
 | **/mb auto** | `<config_id> <world_index> <internal_time>` | 请求 MineBackup 执行自动备份任务，间隔 internal_time 分钟进行自动备份 |
 | **/mb stop** | `<config_id> <world_index>` | 请求 MineBackup 停止自动备份任务 |
 
@@ -81,6 +83,7 @@
 
 3.  **(如果需要) 第三步：执行还原**
     * 执行 `/mb quickrestore "[Full][2025-08-11_12-33-00]world [准备打末影龙！].7z"`。（**提示**：文件名可自动补全）
+    * 如果你运行的是专用服务端，请改用 MineBackupPlugin 执行还原流程。
 
 ## ❓ 常见问题
 

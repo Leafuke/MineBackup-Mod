@@ -145,7 +145,7 @@ public final class ClientRejoinController {
                     MineBackup.LOGGER.warn("Failed to disconnect current level before restore: {}", t.getMessage());
                 }
                 try {
-                    client.disconnect(new SimpleMessageScreen(notice));
+                    client.clearLevel(new SimpleMessageScreen(notice));
                 } catch (Throwable t) {
                     MineBackup.LOGGER.warn("Failed to open disconnect flow before restore: {}", t.getMessage());
                     client.setScreen(new SimpleMessageScreen(notice));
@@ -175,11 +175,7 @@ public final class ClientRejoinController {
 
             waitingForRejoinCompletion = true;
             rejoinCompletionTimeoutTicks = 0;
-            client.createWorldOpenFlows().checkForBackupAndLoad(normalized, () -> {
-                waitingForRejoinCompletion = false;
-                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure cancelled");
-                client.setScreen(new TitleScreen());
-            });
+            client.createWorldOpenFlows().loadLevel(new SelectWorldScreen(new TitleScreen()), normalized);
         } catch (Exception e) {
             waitingForRejoinCompletion = false;
             handleRejoinFailure(client, levelId, e);

@@ -15,7 +15,7 @@ import java.util.concurrent.CompletableFuture;
 public final class CommandHelpRegistry {
     private static final List<HelpEntry> ENTRIES = List.of(
             entry("quickbackup", "[comment]", "Backup the current world", "/mb quickbackup before_boss", "quicksave"),
-            entry("quickrestore", "[backup_file]", "Restore the current world", "/mb quickrestore '[Full][2026-03-24]world.7z'"),
+            entry("quickrestore", "[backup_file]", "Restore the current world (singleplayer/LAN only)", "/mb quickrestore '[Full][2026-03-24]world.7z'"),
             entry("save", "", "Save world data locally", "/mb save"),
             entry("auto", "<config_id> <world_index> <minutes>", "Start auto backup", "/mb auto d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 30"),
             entry("stop", "<config_id> <world_index>", "Stop auto backup", "/mb stop d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0"),
@@ -23,9 +23,9 @@ public final class CommandHelpRegistry {
             entry("list_worlds", "<config_id>", "List worlds in a config", "/mb list_worlds d34ab6e8-68fd-42e8-8dd9-a0648003a5a2"),
             entry("list_backups", "<config_id> <world_index>", "List backups for a world", "/mb list_backups d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0"),
             entry("backup", "<config_id> <world_index> [comment]", "Create a backup for a selected world", "/mb backup d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 before_boss"),
-            entry("restore", "<config_id> <world_index> <backup_file>", "Restore a selected world", "/mb restore d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 '[Full][2026-03-24]world.7z'"),
-            entry("freeze", "", "Save and freeze autosave", "/mb freeze"),
-            entry("unfreeze", "", "Resume autosave", "/mb unfreeze"),
+            entry("restore", "<config_id> <world_index> <backup_file>", "Restore a selected world (singleplayer/LAN only)", "/mb restore d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 '[Full][2026-03-24]world.7z'"),
+            entry("freeze", "", "Save and freeze autosave (singleplayer/LAN only)", "/mb freeze"),
+            entry("unfreeze", "", "Resume autosave (singleplayer/LAN only)", "/mb unfreeze"),
             entry("snap", "<config_id> <world_index> <backup_file>", "Add a backup to WE snapshot", "/mb snap d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 '[Full][2026-03-24]world.7z'")
     );
 

@@ -8,6 +8,8 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.minecraft.text.ClickEvent;
+import net.minecraft.text.HoverEvent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -29,7 +31,7 @@ import java.util.Map;
 
 public class MineBackup implements ModInitializer {
     public static final String MOD_ID = "minebackup";
-    public static final String PLUGIN_GUIDE_URL = "https://github.com/Leafuke/MineBackup-Mod";
+    public static final String PLUGIN_GUIDE_URL = "https://modrinth.com/plugin/minebackupplugin";
     public static final String MOD_VERSION = "2.0.0";
     private static final String MIN_MAIN_PROGRAM_VERSION = "1.14.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -65,12 +67,7 @@ public class MineBackup implements ModInitializer {
             lastHandshakeSuccessVersion = null;
 
             if (server.isDedicated()) {
-                LOGGER.info("MineBackup mod is running on a dedicated server. Dedicated workflows are delegated to the plugin.");
-                if (knotLinkSubscriber != null) {
-                    knotLinkSubscriber.stop();
-                    knotLinkSubscriber = null;
-                }
-                return;
+                LOGGER.info("MineBackup mod is running on a dedicated server with limited support. Restore workflows remain delegated to the plugin.");
             }
 
             if (knotLinkSubscriber == null) {
@@ -95,6 +92,14 @@ public class MineBackup implements ModInitializer {
                 unfreezeAutoSave(server);
             }
             // 不关闭 KnotLink服务，因为等下还有可能rejoin
+            // 仅在专用服务器上停止订阅器
+            if (server.isDedicatedServer()) {
+                if (knotLinkSubscriber != null) {
+                    knotLinkSubscriber.stop();
+                    knotLinkSubscriber = null;
+                    LOGGER.info("[MineBackup] KnotLink subscriber stopped on server shutdown.");
+                }
+            }
         });
 
         ServerTickEvents.END_SERVER_TICK.register(server -> checkFreezeTimeout());
@@ -275,10 +280,6 @@ public class MineBackup implements ModInitializer {
         if (serverInstance == null) {
             return;
         }
-        if (serverInstance.isDedicated()) {
-            LOGGER.info("Ignoring backend broadcast on dedicated server: {}", payload);
-            return;
-        }
 
         if ("minebackup save".equals(payload)) {
             serverInstance.execute(() -> {
@@ -294,6 +295,11 @@ public class MineBackup implements ModInitializer {
         Map<String, String> eventData = parsePayload(payload);
         String eventType = eventData.get("event");
         if (eventType == null) {
+            return;
+        }
+
+        if (serverInstance.isDedicated() && !isDedicatedEventAllowed(eventType)) {
+            handleIgnoredDedicatedEvent(eventType);
             return;
         }
 
@@ -349,6 +355,46 @@ public class MineBackup implements ModInitializer {
         if (message != null) {
             serverInstance.execute(() -> serverInstance.getPlayerManager().broadcast(message, false));
         }
+    }
+
+    private boolean isDedicatedEventAllowed(String eventType) {
+        return switch (eventType) {
+            case "handshake", "pre_hot_backup", "backup_started", "backup_success", "backup_failed",
+                    "auto_backup_started", "we_snapshot_completed", "game_session_end" -> true;
+            default -> false;
+        };
+    }
+
+    private void handleIgnoredDedicatedEvent(String eventType) {
+        switch (eventType) {
+            case "pre_hot_restore" -> {
+                LOGGER.warn("Ignoring unsupported dedicated-server restore event: {}", eventType);
+                broadcastDedicatedRestoreUnsupported();
+            }
+            case "restore_started", "restore_finished", "restore_success", "rejoin_world" ->
+                    LOGGER.warn("Ignoring unsupported dedicated-server restore event: {}", eventType);
+            default -> LOGGER.info("Ignoring unsupported backend event on dedicated server: {}", eventType);
+        }
+    }
+
+    private void broadcastDedicatedRestoreUnsupported() {
+        if (serverInstance == null) {
+            return;
+        }
+        serverInstance.execute(() -> {
+            serverInstance.getPlayerManager().broadcast(
+                    Text.translatable("minebackup.message.restore.unsupported_dedicated"), false);
+            serverInstance.getPlayerManager().broadcast(buildPluginLinkMessage(), false);
+        });
+    }
+
+    private Text buildPluginLinkMessage() {
+        return Text.translatable("minebackup.message.plugin_link_prefix")
+                .append(Text.literal(PLUGIN_GUIDE_URL).styled(style -> style
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, PLUGIN_GUIDE_URL))
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                Text.translatable("minebackup.message.plugin_link_hover")))
+                        .withUnderline(true)));
     }
 
     private void handleHandshake(Map<String, String> eventData) {

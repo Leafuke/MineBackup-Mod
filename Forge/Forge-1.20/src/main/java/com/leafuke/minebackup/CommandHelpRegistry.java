@@ -15,7 +15,7 @@ import java.util.concurrent.CompletableFuture;
 public final class CommandHelpRegistry {
     private static final List<HelpEntry> ENTRIES = List.of(
             entry("quickbackup", "[comment]", "Backup current world / 备份当前世界", "/mb quickbackup before_boss", "quicksave"),
-            entry("quickrestore", "[backup_file]", "Restore current world / 还原当前世界", "/mb quickrestore '[Full][2026-03-24]world.7z'"),
+            entry("quickrestore", "[backup_file]", "Restore current world (singleplayer/LAN only) / 还原当前世界（仅限单机/局域网）", "/mb quickrestore '[Full][2026-03-24]world.7z'"),
             entry("save", "", "Save world data locally / 本地完整保存", "/mb save"),
             entry("auto", "<config_id> <world_index> <minutes>", "Start auto backup / 启动自动备份", "/mb auto d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 30"),
             entry("stop", "<config_id> <world_index>", "Stop auto backup / 停止自动备份", "/mb stop d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0"),
@@ -23,9 +23,9 @@ public final class CommandHelpRegistry {
             entry("list_worlds", "<config_id>", "List worlds in config / 列出配置中的世界", "/mb list_worlds d34ab6e8-68fd-42e8-8dd9-a0648003a5a2"),
             entry("list_backups", "<config_id> <world_index>", "List backups for world / 列出世界备份", "/mb list_backups d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0"),
             entry("backup", "<config_id> <world_index> [comment]", "Create backup for selected world / 备份指定世界", "/mb backup d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 before_boss"),
-            entry("restore", "<config_id> <world_index> <backup_file>", "Restore selected world / 还原指定世界", "/mb restore d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 '[Full][2026-03-24]world.7z'"),
-            entry("freeze", "", "Freeze autosave after local save / 保存后冻结自动保存", "/mb freeze"),
-            entry("unfreeze", "", "Resume autosave / 恢复自动保存", "/mb unfreeze"),
+            entry("restore", "<config_id> <world_index> <backup_file>", "Restore selected world (singleplayer/LAN only) / 还原指定世界（仅限单机/局域网）", "/mb restore d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 '[Full][2026-03-24]world.7z'"),
+            entry("freeze", "", "Freeze autosave after local save (singleplayer/LAN only) / 保存后冻结自动保存（仅限单机/局域网）", "/mb freeze"),
+            entry("unfreeze", "", "Resume autosave (singleplayer/LAN only) / 恢复自动保存（仅限单机/局域网）", "/mb unfreeze"),
             entry("snap", "<config_id> <world_index> <backup_file>", "Add backup to WE snapshot / 加入 WE 快照", "/mb snap d34ab6e8-68fd-42e8-8dd9-a0648003a5a2 0 '[Full][2026-03-24]world.7z'")
     );
 

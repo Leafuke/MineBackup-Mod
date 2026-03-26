@@ -43,28 +43,30 @@ public class Command {
                                     return 1;
                                 })))
                 .then(Commands.literal("save")
-                        .executes(ctx -> executeDedicatedAware(ctx.getSource(), () -> saveAllWorlds(ctx.getSource()))))
+                    .executes(ctx -> saveAllWorlds(ctx.getSource()) ? 1 : 0))
                 .then(Commands.literal("list_configs")
-                        .executes(ctx -> executeDedicatedAware(ctx.getSource(), () -> {
+                    .executes(ctx -> {
                             ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_configs.start"), false);
                             queryBackend("LIST_CONFIGS", response -> handleListConfigsResponse(ctx.getSource(), response));
-                        })))
+                        return 1;
+                    }))
                 .then(Commands.literal("list_worlds")
                         .then(Commands.argument("config_id", StringArgumentType.string())
                                 .suggests((ctx, builder) -> CommandSuggestions.suggestConfigIds(builder))
-                                .executes(ctx -> executeDedicatedAware(ctx.getSource(), () -> {
+                        .executes(ctx -> {
                                     String configId = StringArgumentType.getString(ctx, "config_id");
                                     ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.list_worlds.start", configId), false);
                                     queryBackend(String.format("LIST_WORLDS %s", configId),
                                             response -> handleListWorldsResponse(ctx.getSource(), response, configId));
-                                }))))
+                            return 1;
+                        })))
                 .then(Commands.literal("list_backups")
                         .then(Commands.argument("config_id", StringArgumentType.string())
                                 .suggests((ctx, builder) -> CommandSuggestions.suggestConfigIds(builder))
                                 .then(Commands.argument("world_index", IntegerArgumentType.integer())
                                         .suggests((ctx, builder) -> CommandSuggestions.suggestWorldIndices(
                                                 StringArgumentType.getString(ctx, "config_id"), builder))
-                                        .executes(ctx -> executeDedicatedAware(ctx.getSource(), () -> {
+                            .executes(ctx -> {
                                             String configId = StringArgumentType.getString(ctx, "config_id");
                                             int worldIndex = IntegerArgumentType.getInteger(ctx, "world_index");
                                             ctx.getSource().sendSuccess(
@@ -72,7 +74,8 @@ public class Command {
                                                     false);
                                             queryBackend(String.format("LIST_BACKUPS %s %d", configId, worldIndex),
                                                     response -> handleListBackupsResponse(ctx.getSource(), response, configId, worldIndex));
-                                        })))))
+                                return 1;
+                            }))))
                 .then(Commands.literal("backup")
                         .then(Commands.argument("config_id", StringArgumentType.string())
                                 .suggests((ctx, builder) -> CommandSuggestions.suggestConfigIds(builder))
@@ -101,6 +104,9 @@ public class Command {
                                                         IntegerArgumentType.getInteger(ctx, "world_index"),
                                                         builder))
                                                 .executes(ctx -> {
+                                                    if (handleDedicatedRestoreUnsupported(ctx.getSource())) {
+                                                        return 1;
+                                                    }
                                                     String backupFile = requireSingleQuotedString(ctx, "backup_file");
                                                     if (backupFile == null) {
                                                         return 0;
@@ -120,10 +126,18 @@ public class Command {
                         .then(Commands.argument("comment", StringArgumentType.greedyString())
                                 .executes(ctx -> executeQuickBackup(ctx.getSource(), StringArgumentType.getString(ctx, "comment")))))
                 .then(Commands.literal("quickrestore")
-                        .executes(ctx -> executeRemoteCommand(ctx.getSource(), "RESTORE_CURRENT_LATEST"))
+                        .executes(ctx -> {
+                            if (handleDedicatedRestoreUnsupported(ctx.getSource())) {
+                                return 1;
+                            }
+                            return executeRemoteCommand(ctx.getSource(), "RESTORE_CURRENT_LATEST");
+                        })
                         .then(Commands.argument("backup_file", StringArgumentType.string())
                                 .suggests((ctx, builder) -> CommandSuggestions.suggestCurrentBackupFiles(builder))
                                 .executes(ctx -> {
+                                    if (handleDedicatedRestoreUnsupported(ctx.getSource())) {
+                                        return 1;
+                                    }
                                     String backupFile = requireSingleQuotedString(ctx, "backup_file");
                                     if (backupFile == null) {
                                         return 0;
@@ -179,12 +193,12 @@ public class Command {
                                                             IntegerArgumentType.getInteger(ctx, "world_index"),
                                                             backupFile);
                                                     ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.snap.sent", command), false);
-                                                    return executeDedicatedAware(ctx.getSource(),
-                                                            () -> queryBackend(command, response -> handleGenericResponse(ctx.getSource(), response, "snap")));
+                                                        queryBackend(command, response -> handleGenericResponse(ctx.getSource(), response, "snap"));
+                                                        return 1;
                                                 })))))
                 .then(Commands.literal("freeze")
                         .executes(ctx -> {
-                            if (handleDedicatedServerUnsupported(ctx.getSource())) {
+                                            if (handleDedicatedFreezeUnsupported(ctx.getSource())) {
                                 return 1;
                             }
                             if (MineBackup.isSaveFrozen()) {
@@ -200,7 +214,7 @@ public class Command {
                         }))
                 .then(Commands.literal("unfreeze")
                         .executes(ctx -> {
-                            if (handleDedicatedServerUnsupported(ctx.getSource())) {
+                            if (handleDedicatedFreezeUnsupported(ctx.getSource())) {
                                 return 1;
                             }
                             if (!MineBackup.isSaveFrozen()) {
@@ -217,17 +231,11 @@ public class Command {
                 .requires(Command::hasCommandAccess)
                 .executes(ctx -> {
                     ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.command.migrated"), false);
-                    if (ctx.getSource().getServer().isDedicatedServer()) {
-                        return sendPluginRedirect(ctx.getSource());
-                    }
                     return 1;
                 })
                 .then(Commands.argument("args", StringArgumentType.greedyString())
                         .executes(ctx -> {
                             ctx.getSource().sendSuccess(() -> Component.translatable("minebackup.message.command.migrated"), false);
-                            if (ctx.getSource().getServer().isDedicatedServer()) {
-                                return sendPluginRedirect(ctx.getSource());
-                            }
                             return 1;
                         })));
     }
@@ -252,27 +260,23 @@ public class Command {
         return profile != null && source.getServer().isSingleplayerOwner(profile);
     }
 
-    private static int executeDedicatedAware(CommandSourceStack source, Runnable action) {
-        if (handleDedicatedServerUnsupported(source)) {
-            return 1;
-        }
-        action.run();
-        return 1;
-    }
-
-    private static boolean handleDedicatedServerUnsupported(CommandSourceStack source) {
+    private static boolean handleDedicatedRestoreUnsupported(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
         if (server != null && server.isDedicatedServer()) {
-            sendPluginRedirect(source);
+            source.sendFailure(Component.translatable("minebackup.message.restore.unsupported_dedicated"));
+            source.sendSuccess(Command::buildPluginLinkMessage, false);
             return true;
         }
         return false;
     }
 
-    private static int sendPluginRedirect(CommandSourceStack source) {
-        source.sendFailure(Component.translatable("minebackup.message.plugin_required"));
-        source.sendSuccess(Command::buildPluginLinkMessage, false);
-        return 1;
+    private static boolean handleDedicatedFreezeUnsupported(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        if (server != null && server.isDedicatedServer()) {
+            source.sendFailure(Component.translatable("minebackup.message.freeze.unsupported_dedicated"));
+            return true;
+        }
+        return false;
     }
 
     private static MutableComponent buildPluginLinkMessage() {
@@ -285,9 +289,6 @@ public class Command {
     }
 
     private static int executeQuickBackup(CommandSourceStack source, String comment) {
-        if (handleDedicatedServerUnsupported(source)) {
-            return 1;
-        }
         if (!saveAllWorlds(source)) {
             return 0;
         }
@@ -363,9 +364,6 @@ public class Command {
         if (command == null || command.trim().isEmpty()) {
             source.sendFailure(Component.translatable("minebackup.message.command.invalid"));
             return 0;
-        }
-        if (handleDedicatedServerUnsupported(source)) {
-            return 1;
         }
         source.sendSuccess(() -> Component.translatable("minebackup.message.command.sent", command), false);
         String commandType = normalizeCommandType(command.split(" ")[0].toLowerCase(Locale.ROOT));
