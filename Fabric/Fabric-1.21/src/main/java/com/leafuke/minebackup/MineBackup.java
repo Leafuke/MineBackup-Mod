@@ -1,5 +1,6 @@
 package com.leafuke.minebackup;
 
+import com.mojang.authlib.GameProfile;
 import com.leafuke.minebackup.knotlink.OpenSocketQuerier;
 import com.leafuke.minebackup.knotlink.SignalSubscriber;
 import com.leafuke.minebackup.restore.HotRestoreState;
@@ -15,8 +16,12 @@ import net.minecraft.util.WorldSavePath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -33,6 +38,8 @@ public class MineBackup implements ModInitializer {
     public static final String BROADCAST_SIGNAL_ID = "0x00000020";
     private static final String QUERIER_APP_ID = "0x00000020";
     private static final String QUERIER_SOCKET_ID = "0x00000010";
+    private static final long INTEGRATED_RESTORE_ACK_POLL_MS = 100L;
+    private static final long INTEGRATED_RESTORE_ACK_TIMEOUT_MS = 10_000L;
 
     private static SignalSubscriber knotLinkSubscriber;
     private static volatile MinecraftServer serverInstance;
@@ -378,6 +385,11 @@ public class MineBackup implements ModInitializer {
 
     private void handlePreHotRestore(Map<String, String> eventData) {
         serverInstance.execute(() -> {
+            if (HotRestoreState.isRestoring) {
+                LOGGER.warn("Ignored duplicate pre_hot_restore signal while restore is still running.");
+                return;
+            }
+
             serverInstance.getPlayerManager().broadcast(Text.translatable("minebackup.message.restore.preparing"), false);
             HotRestoreState.isRestoring = true;
             HotRestoreState.waitingForServerStopAck = true;
@@ -385,16 +397,10 @@ public class MineBackup implements ModInitializer {
             if (serverInstance.isDedicated()) {
                 LocalSaveCoordinator.saveForLocalCommand(serverInstance);
                 Text kickMessage = Text.translatable("minebackup.message.restore.kick");
-                for (ServerPlayerEntity player : serverInstance.getPlayerManager().getPlayerList().toArray(new ServerPlayerEntity[0])) {
-                    try {
-                        player.networkHandler.disconnect(kickMessage);
-                    } catch (Exception e) {
-                        LOGGER.warn("Failed to disconnect player: {}", e.getMessage());
-                    }
-                }
+                disconnectPlayersForRestore(kickMessage, false);
                 new Thread(() -> {
                     sleepQuietly(500L);
-                    OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVE_AND_EXIT_COMPLETE");
+                    sendWorldSaveAndExitAck();
                 }).start();
                 serverInstance.stop(false);
                 return;
@@ -406,18 +412,8 @@ public class MineBackup implements ModInitializer {
             LocalSaveCoordinator.saveForLocalCommand(serverInstance);
 
             Text kickMessage = Text.translatable("minebackup.message.restore.kick");
-            for (ServerPlayerEntity player : serverInstance.getPlayerManager().getPlayerList().toArray(new ServerPlayerEntity[0])) {
-                try {
-                    player.networkHandler.disconnect(kickMessage);
-                } catch (Exception e) {
-                    LOGGER.warn("Failed to disconnect player: {}", e.getMessage());
-                }
-            }
-
-            new Thread(() -> {
-                sleepQuietly(400L);
-                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVE_AND_EXIT_COMPLETE");
-            }).start();
+            disconnectPlayersForRestore(kickMessage, true);
+            startIntegratedRestoreAckWatcher(serverInstance);
         });
     }
 
@@ -472,6 +468,112 @@ public class MineBackup implements ModInitializer {
             }
         }
         HotRestoreState.waitingForServerStopAck = false;
+    }
+
+    private void disconnectPlayersForRestore(Text kickMessage, boolean hostLast) {
+        ServerPlayerEntity[] players = serverInstance.getPlayerManager().getPlayerList().toArray(new ServerPlayerEntity[0]);
+        if (!hostLast) {
+            for (ServerPlayerEntity player : players) {
+                disconnectPlayer(player, kickMessage);
+            }
+            return;
+        }
+
+        for (ServerPlayerEntity player : players) {
+            if (!isSingleplayerHost(player)) {
+                disconnectPlayer(player, kickMessage);
+            }
+        }
+        for (ServerPlayerEntity player : players) {
+            if (isSingleplayerHost(player)) {
+                disconnectPlayer(player, kickMessage);
+            }
+        }
+    }
+
+    private void disconnectPlayer(ServerPlayerEntity player, Text kickMessage) {
+        try {
+            player.networkHandler.disconnect(kickMessage);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to disconnect player '{}': {}", player.getGameProfile().getName(), e.getMessage());
+        }
+    }
+
+    private boolean isSingleplayerHost(ServerPlayerEntity player) {
+        if (player == null || serverInstance == null) {
+            return false;
+        }
+        try {
+            GameProfile profile = player.getGameProfile();
+            return profile != null && serverInstance.isHost(profile);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void startIntegratedRestoreAckWatcher(MinecraftServer restoreServer) {
+        new Thread(() -> {
+            long startAt = System.currentTimeMillis();
+            while (true) {
+                if (isIntegratedRestoreReadyForAck(restoreServer)) {
+                    sendWorldSaveAndExitAck();
+                    return;
+                }
+
+                long elapsed = System.currentTimeMillis() - startAt;
+                if (elapsed >= INTEGRATED_RESTORE_ACK_TIMEOUT_MS) {
+                    LOGGER.warn("Timed out waiting integrated server release for restore ACK after {}ms.", elapsed);
+                    sendWorldSaveAndExitAck();
+                    return;
+                }
+
+                sleepQuietly(INTEGRATED_RESTORE_ACK_POLL_MS);
+            }
+        }, "MineBackup-RestoreAckWaiter").start();
+    }
+
+    private boolean isIntegratedRestoreReadyForAck(MinecraftServer restoreServer) {
+        if (restoreServer == null) {
+            return true;
+        }
+
+        try {
+            if (!restoreServer.getPlayerManager().getPlayerList().isEmpty()) {
+                return false;
+            }
+        } catch (Exception e) {
+            return false;
+        }
+
+        return canAcquireSessionLock(restoreServer);
+    }
+
+    private boolean canAcquireSessionLock(MinecraftServer restoreServer) {
+        try {
+            Path root = restoreServer.getSavePath(WorldSavePath.ROOT);
+            if (root == null) {
+                return true;
+            }
+
+            Path lockPath = root.resolve("session.lock");
+            if (!Files.exists(lockPath)) {
+                return true;
+            }
+
+            try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.WRITE)) {
+                try (FileLock lock = channel.tryLock()) {
+                    return lock != null;
+                } catch (OverlappingFileLockException e) {
+                    return false;
+                }
+            }
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void sendWorldSaveAndExitAck() {
+        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "WORLD_SAVE_AND_EXIT_COMPLETE");
     }
 
     private void checkFreezeTimeout() {
