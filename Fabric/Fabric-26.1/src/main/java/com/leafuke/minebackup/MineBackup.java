@@ -389,11 +389,9 @@ public class MineBackup implements ModInitializer {
     private Component buildPluginLinkMessage() {
         return Component.translatable("minebackup.message.plugin_link_prefix")
                 .append(Component.literal(PLUGIN_GUIDE_URL).withStyle(style -> style
-                .withClickEvent(new net.minecraft.network.chat.ClickEvent(
-                    net.minecraft.network.chat.ClickEvent.Action.OPEN_URL, PLUGIN_GUIDE_URL))
-                .withHoverEvent(new net.minecraft.network.chat.HoverEvent(
-                    net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
-                    Component.translatable("minebackup.message.plugin_link_hover")))
+                        .withClickEvent(new net.minecraft.network.chat.ClickEvent.OpenUrl(java.net.URI.create(PLUGIN_GUIDE_URL)))
+                        .withHoverEvent(new net.minecraft.network.chat.HoverEvent.ShowText(
+                                Component.translatable("minebackup.message.plugin_link_hover")))
                         .withUnderlined(true)));
     }
 

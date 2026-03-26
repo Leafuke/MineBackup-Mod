@@ -93,7 +93,7 @@ public class MineBackup implements ModInitializer {
             }
             // 不关闭 KnotLink服务，因为等下还有可能rejoin
             // 仅在专用服务器上停止订阅器
-            if (server.isDedicatedServer()) {
+            if (server.isDedicated()) {
                 if (knotLinkSubscriber != null) {
                     knotLinkSubscriber.stop();
                     knotLinkSubscriber = null;
