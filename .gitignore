@@ -43,6 +43,8 @@ replay_*.log
 !/Fabric/Fabric-26.1/gradle/wrapper/gradle-wrapper.jar
 !/Neoforge/NeoForge-1.21/gradlew.bat
 !/Neoforge/NeoForge-1.21/gradle/wrapper/gradle-wrapper.jar
+!/Neoforge/NeoForge-26.1/gradlew.bat
+!/Neoforge/NeoForge-26.1/gradle/wrapper/gradle-wrapper.jar
 !/Forge/Forge-1.20/gradlew.bat
 !/Forge/Forge-1.20/gradle/wrapper/gradle-wrapper.jar
 

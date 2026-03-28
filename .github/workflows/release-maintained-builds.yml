@@ -29,6 +29,7 @@ jobs:
             "Fabric/Fabric-1.21.11/gradle.properties"
             "Fabric/Fabric-26.1/gradle.properties"
             "Neoforge/NeoForge-1.21/gradle.properties"
+            "Neoforge/NeoForge-26.1/gradle.properties"
             "Forge/Forge-1.20/gradle.properties"
           )
 
@@ -87,6 +88,11 @@ jobs:
             minecraft: 1.21
             java: '21'
             project_dir: Neoforge/NeoForge-1.21
+          - id: neoforge-26.1
+            loader: neoforge
+            minecraft: 26.1
+            java: '25'
+            project_dir: Neoforge/NeoForge-26.1
           - id: forge-1.20
             loader: forge
             minecraft: 1.20
@@ -172,6 +178,10 @@ jobs:
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $RELEASE_TAG already exists. Refreshing assets."
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_NAME" \
+              --target "$GITHUB_SHA"
           else
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
