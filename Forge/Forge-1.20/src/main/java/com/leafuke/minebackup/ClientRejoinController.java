@@ -220,7 +220,7 @@ public final class ClientRejoinController {
     private static boolean tryPublishLan(IntegratedServer server, int port) {
         try {
             GameType gameType = server.getDefaultGameType();
-            boolean allowCommands = server.getPlayerList() != null && server.getPlayerList().isAllowCommandsForAllPlayers();
+            boolean allowCommands = server.getWorldData().getLevelSettings().allowCommands();
             return server.publishServer(gameType, allowCommands, port);
         } catch (Exception e) {
             MineBackup.LOGGER.warn("Failed to reopen LAN after restore: {}", e.getMessage());
