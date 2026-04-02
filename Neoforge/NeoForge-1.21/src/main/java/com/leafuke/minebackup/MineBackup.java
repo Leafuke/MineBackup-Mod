@@ -466,6 +466,8 @@ public class MineBackup {
                 return;
             }
 
+            captureLanStateBeforeRestore(serverInstance);
+
             String levelId = resolveRejoinLevelId(serverInstance, eventData.get("world"));
             MineBackupClient.setWorldToRejoin(levelId);
             HotRestoreState.levelIdToRejoin = levelId;
@@ -475,6 +477,32 @@ public class MineBackup {
             disconnectPlayersForRestore(kickMessage, true);
             startIntegratedRestoreAckWatcher(serverInstance);
         });
+    }
+
+    private void captureLanStateBeforeRestore(MinecraftServer server) {
+        HotRestoreState.reopenLanAfterRestore = false;
+        HotRestoreState.lastLanPort = -1;
+
+        if (server == null || !Config.isAutoReopenLanAfterRestore()) {
+            return;
+        }
+
+        try {
+            if (!server.isPublished()) {
+                return;
+            }
+
+            int lanPort = server.getPort();
+            if (lanPort <= 0) {
+                return;
+            }
+
+            HotRestoreState.reopenLanAfterRestore = true;
+            HotRestoreState.lastLanPort = lanPort;
+            LOGGER.info("Captured LAN publish state before restore, port={}", lanPort);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to capture LAN publish state before restore: {}", e.getMessage());
+        }
     }
 
     private void handleRestoreFinished(Map<String, String> eventData, String eventType) {

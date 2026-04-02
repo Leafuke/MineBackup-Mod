@@ -14,12 +14,14 @@ public class MineBackupClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        Config.load();
         UPDATE_CHECKER.start();
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
     }
 
     private void onClientTick(MinecraftClient client) {
         tryShowUpdateMessage(client);
+        LanAutoReconnectController.onClientTick(client);
         ClientRejoinController.onClientTick(client);
     }
 

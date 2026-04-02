@@ -15,6 +15,7 @@ public class MineBackupClient {
     private static boolean updatePromptShown = false;
 
     public MineBackupClient() {
+        Config.load();
         UPDATE_CHECKER.start();
         NeoForge.EVENT_BUS.register(this);
     }
@@ -23,6 +24,7 @@ public class MineBackupClient {
     public void onClientTick(ClientTickEvent.Post event) {
         Minecraft client = Minecraft.getInstance();
         tryShowUpdateMessage(client);
+        LanAutoReconnectController.onClientTick(client);
         ClientRejoinController.onClientTick(client);
     }
 

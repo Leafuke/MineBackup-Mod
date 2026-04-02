@@ -25,6 +25,16 @@ public final class HotRestoreState {
      */
     public static volatile boolean isRestoring = false;
 
+    /**
+     * 标记回档完成后是否需要自动重新开放局域网
+     */
+    public static volatile boolean reopenLanAfterRestore = false;
+
+    /**
+     * 回档前局域网使用的端口，<=0 表示无可用端口
+     */
+    public static volatile int lastLanPort = -1;
+
     // ========== KnotLink 握手信息 ==========
 
     /** 握手是否已完成 */
@@ -44,6 +54,8 @@ public final class HotRestoreState {
         waitingForServerStopAck = false;
         levelIdToRejoin = null;
         isRestoring = false;
+        reopenLanAfterRestore = false;
+        lastLanPort = -1;
     }
 
     /**

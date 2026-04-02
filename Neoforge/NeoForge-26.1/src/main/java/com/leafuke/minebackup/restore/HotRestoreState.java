@@ -6,6 +6,8 @@ public final class HotRestoreState {
     public static volatile boolean waitingForServerStopAck = false;
     public static volatile String levelIdToRejoin = null;
     public static volatile boolean isRestoring = false;
+    public static volatile boolean reopenLanAfterRestore = false;
+    public static volatile int lastLanPort = -1;
 
     public static volatile boolean handshakeCompleted = false;
     public static volatile String mainProgramVersion = null;
@@ -16,6 +18,8 @@ public final class HotRestoreState {
         waitingForServerStopAck = false;
         levelIdToRejoin = null;
         isRestoring = false;
+        reopenLanAfterRestore = false;
+        lastLanPort = -1;
     }
 
     public static void resetHandshake() {

@@ -67,6 +67,9 @@
   "minebackup.message.restore.entering": "§7[MineBackup] Entering world...",
   "minebackup.message.restore.waiting": "§7[MineBackup] Waiting for restore to finish...",
   "minebackup.message.restore.failed_status": "§c[MineBackup] The backend reported restore failure. Auto rejoin cancelled.",
+  "minebackup.message.lan.reopen.success": "§a[MineBackup] LAN has been reopened on port §f%s",
+  "minebackup.message.lan.reopen.fallback": "§e[MineBackup] Preferred port is unavailable, trying fallback port §f%s",
+  "minebackup.message.lan.reopen.failed": "§c[MineBackup] Failed to reopen LAN automatically. Please open to LAN manually.",
 
   "minebackup.message.handshake.success": "§7[MineBackup] Connected to backend v%s.",
   "minebackup.message.handshake.version_incompatible": "§c[MineBackup] Mod version §f%s §cis lower than the backend minimum §f%s§c. Some features may not work correctly.",

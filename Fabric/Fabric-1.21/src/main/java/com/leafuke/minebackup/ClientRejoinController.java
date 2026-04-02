@@ -8,7 +8,10 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.gui.screen.world.SelectWorldScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.server.integrated.IntegratedServer;
 import net.minecraft.text.Text;
+import net.minecraft.util.NetworkUtils;
+import net.minecraft.world.GameMode;
 
 public final class ClientRejoinController {
     private static final String QUERIER_APP_ID = "0x00000020";
@@ -17,6 +20,7 @@ public final class ClientRejoinController {
     private static final int MAX_RETRY_COUNT = 5;
     private static final int DISCONNECT_WAIT_TICKS = 20;
     private static final int REJOIN_COMPLETION_TIMEOUT_TICKS = 600;
+    private static final int LAN_REOPEN_INITIAL_DELAY_TICKS = 20;
 
     private static volatile String worldToRejoin;
     private static volatile boolean readyToRejoin;
@@ -27,11 +31,18 @@ public final class ClientRejoinController {
     private static int retryCount;
     private static int disconnectWaitTicks;
     private static int rejoinCompletionTimeoutTicks;
+    private static volatile boolean pendingLanReopen;
+    private static int lanReopenWaitTicks;
+    private static int lanReopenAttemptCount;
+    private static int lanReopenPort = -1;
+    private static boolean lanReopenTriedRandomFallback;
 
     private ClientRejoinController() {
     }
 
     public static void onClientTick(MinecraftClient client) {
+        tickPendingLanReopen(client);
+
         if (waitingForRejoinCompletion) {
             if (client.world != null) {
                 waitingForRejoinCompletion = false;
@@ -39,6 +50,7 @@ public final class ClientRejoinController {
                 OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT success");
                 retryCount = 0;
                 worldToRejoin = null;
+                scheduleLanReopenAfterRestore(client);
                 HotRestoreState.reset();
                 return;
             }
@@ -123,7 +135,121 @@ public final class ClientRejoinController {
         retryCount = 0;
         disconnectWaitTicks = 0;
         rejoinCompletionTimeoutTicks = 0;
+        resetLanReopenState();
         HotRestoreState.reset();
+    }
+
+    private static void tickPendingLanReopen(MinecraftClient client) {
+        if (!pendingLanReopen) {
+            return;
+        }
+        if (client == null || client.world == null) {
+            return;
+        }
+
+        IntegratedServer server = client.getServer();
+        if (server == null) {
+            return;
+        }
+        if (server.isRemote()) {
+            resetLanReopenState();
+            return;
+        }
+
+        if (lanReopenWaitTicks > 0) {
+            lanReopenWaitTicks--;
+            return;
+        }
+
+        int targetPort = lanReopenPort;
+        if (targetPort <= 0) {
+            targetPort = NetworkUtils.findLocalPort();
+            lanReopenPort = targetPort;
+        }
+        if (targetPort <= 0) {
+            finishLanReopenFailure(client);
+            return;
+        }
+
+        if (tryPublishLan(server, targetPort)) {
+            resetLanReopenState();
+            showClientTip(client, Text.translatable("minebackup.message.lan.reopen.success", targetPort));
+            return;
+        }
+
+        lanReopenAttemptCount++;
+        if (lanReopenAttemptCount < Config.getLanReopenRetryCount()) {
+            lanReopenWaitTicks = Config.getLanReopenRetryIntervalTicks();
+            return;
+        }
+
+        if (!lanReopenTriedRandomFallback && Config.isLanReopenAllowRandomPortFallback()) {
+            int fallbackPort = NetworkUtils.findLocalPort();
+            if (fallbackPort > 0 && fallbackPort != lanReopenPort) {
+                lanReopenPort = fallbackPort;
+                lanReopenAttemptCount = 0;
+                lanReopenTriedRandomFallback = true;
+                lanReopenWaitTicks = Config.getLanReopenRetryIntervalTicks();
+                showClientTip(client, Text.translatable("minebackup.message.lan.reopen.fallback", fallbackPort));
+                return;
+            }
+        }
+
+        finishLanReopenFailure(client);
+    }
+
+    private static void scheduleLanReopenAfterRestore(MinecraftClient client) {
+        if (!Config.isAutoReopenLanAfterRestore() || !HotRestoreState.reopenLanAfterRestore) {
+            resetLanReopenState();
+            return;
+        }
+
+        int preferredPort = HotRestoreState.lastLanPort;
+        if (preferredPort <= 0) {
+            IntegratedServer server = client == null ? null : client.getServer();
+            preferredPort = server == null ? -1 : server.getServerPort();
+        }
+
+        pendingLanReopen = true;
+        lanReopenPort = preferredPort;
+        lanReopenWaitTicks = LAN_REOPEN_INITIAL_DELAY_TICKS;
+        lanReopenAttemptCount = 0;
+        lanReopenTriedRandomFallback = false;
+    }
+
+    private static boolean tryPublishLan(IntegratedServer server, int port) {
+        try {
+            GameMode gameMode = server.getDefaultGameMode();
+            boolean allowCommands = server.getSaveProperties().areCommandsAllowed();
+            return server.openToLan(gameMode, allowCommands, port);
+        } catch (Exception e) {
+            MineBackup.LOGGER.warn("Failed to reopen LAN after restore: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private static void finishLanReopenFailure(MinecraftClient client) {
+        resetLanReopenState();
+        showClientTip(client, Text.translatable("minebackup.message.lan.reopen.failed"));
+    }
+
+    private static void resetLanReopenState() {
+        pendingLanReopen = false;
+        lanReopenWaitTicks = 0;
+        lanReopenAttemptCount = 0;
+        lanReopenPort = -1;
+        lanReopenTriedRandomFallback = false;
+    }
+
+    private static void showClientTip(MinecraftClient client, Text message) {
+        if (client == null || message == null) {
+            return;
+        }
+        client.execute(() -> {
+            if (client.player != null) {
+                client.player.sendMessage(message, false);
+            }
+        });
     }
 
     private static void attemptAutoRejoin(MinecraftClient client, String levelId) {

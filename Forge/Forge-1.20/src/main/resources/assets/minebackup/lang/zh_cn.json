@@ -67,6 +67,9 @@
   "minebackup.message.restore.entering": "§7[MineBackup] 正在进入存档...",
   "minebackup.message.restore.waiting": "§7[MineBackup] 正在等待还原完成...",
   "minebackup.message.restore.failed_status": "§c[MineBackup] 主程序报告还原失败，已取消自动重连。",
+  "minebackup.message.lan.reopen.success": "§a[MineBackup] 已重新开放局域网，端口：§f%s",
+  "minebackup.message.lan.reopen.fallback": "§e[MineBackup] 原端口不可用，将尝试备用端口：§f%s",
+  "minebackup.message.lan.reopen.failed": "§c[MineBackup] 自动开放局域网失败，请手动在菜单中重新开放。",
 
   "minebackup.message.handshake.success": "§7[MineBackup] 已连接主程序 v%s。",
   "minebackup.message.handshake.version_incompatible": "§c[MineBackup] 模组版本 §f%s §c低于主程序要求的最低版本 §f%s§c，部分功能可能异常。",

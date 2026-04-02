@@ -19,6 +19,7 @@ public class Config {
     private static final boolean LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT = true;
 
     private static final boolean AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT = true;
+    private static final int LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT = 200;
     private static final int LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT = 100;
     private static final int LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT = 1800;
 
@@ -30,6 +31,7 @@ public class Config {
     private static int lanReopenRetryIntervalTicks = LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT;
     private static boolean lanReopenAllowRandomPortFallback = LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT;
     private static boolean autoReconnectLanClientAfterRestore = AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT;
+    private static int lanClientReconnectInitialDelayTicks = LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT;
     private static int lanClientReconnectIntervalTicks = LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT;
     private static int lanClientReconnectMaxDurationTicks = LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT;
 
@@ -58,6 +60,8 @@ public class Config {
                 LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT);
             autoReconnectLanClientAfterRestore = parseBoolean(props.getProperty("autoReconnectLanClientAfterRestore"),
                 AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT);
+            lanClientReconnectInitialDelayTicks = clamp(parseInt(props.getProperty("lanClientReconnectInitialDelayTicks"),
+                LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT), 40, 600);
             lanClientReconnectIntervalTicks = clamp(parseInt(props.getProperty("lanClientReconnectIntervalTicks"),
                 LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT), 20, 200);
             lanClientReconnectMaxDurationTicks = clamp(parseInt(props.getProperty("lanClientReconnectMaxDurationTicks"),
@@ -81,6 +85,7 @@ public class Config {
         props.setProperty("lanReopenRetryIntervalTicks", String.valueOf(lanReopenRetryIntervalTicks));
         props.setProperty("lanReopenAllowRandomPortFallback", String.valueOf(lanReopenAllowRandomPortFallback));
         props.setProperty("autoReconnectLanClientAfterRestore", String.valueOf(autoReconnectLanClientAfterRestore));
+        props.setProperty("lanClientReconnectInitialDelayTicks", String.valueOf(lanClientReconnectInitialDelayTicks));
         props.setProperty("lanClientReconnectIntervalTicks", String.valueOf(lanClientReconnectIntervalTicks));
         props.setProperty("lanClientReconnectMaxDurationTicks", String.valueOf(lanClientReconnectMaxDurationTicks));
 
@@ -139,6 +144,10 @@ public class Config {
         return autoReconnectLanClientAfterRestore;
     }
 
+    public static int getLanClientReconnectInitialDelayTicks() {
+        return lanClientReconnectInitialDelayTicks;
+    }
+
     public static int getLanClientReconnectIntervalTicks() {
         return lanClientReconnectIntervalTicks;
     }
@@ -156,6 +165,7 @@ public class Config {
         lanReopenRetryIntervalTicks = LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT;
         lanReopenAllowRandomPortFallback = LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT;
         autoReconnectLanClientAfterRestore = AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT;
+        lanClientReconnectInitialDelayTicks = LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT;
         lanClientReconnectIntervalTicks = LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT;
         lanClientReconnectMaxDurationTicks = LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT;
     }

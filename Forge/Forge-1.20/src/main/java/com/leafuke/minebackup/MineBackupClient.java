@@ -14,6 +14,7 @@ public class MineBackupClient {
     private static boolean updatePromptShown = false;
 
     public static void initialize() {
+        Config.load();
         UPDATE_CHECKER.start();
         MinecraftForge.EVENT_BUS.register(new MineBackupClient());
     }
@@ -26,6 +27,7 @@ public class MineBackupClient {
 
         Minecraft client = Minecraft.getInstance();
         tryShowUpdateMessage(client);
+        LanAutoReconnectController.onClientTick(client);
         ClientRejoinController.onClientTick(client);
     }
 

@@ -12,9 +12,27 @@ import java.util.Properties;
 public class Config {
     private static final String CONFIG_FILE = "minebackup-auto.properties";
 
+    private static final boolean AUTO_REOPEN_LAN_AFTER_RESTORE_DEFAULT = true;
+    private static final int LAN_REOPEN_RETRY_COUNT_DEFAULT = 6;
+    private static final int LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT = 40;
+    private static final boolean LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT = true;
+
+    private static final boolean AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT = true;
+    private static final int LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT = 200;
+    private static final int LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT = 100;
+    private static final int LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT = 1800;
+
     private static String configId;
     private static int worldIndex = -1;
     private static int internalTime = -1;
+    private static boolean autoReopenLanAfterRestore = AUTO_REOPEN_LAN_AFTER_RESTORE_DEFAULT;
+    private static int lanReopenRetryCount = LAN_REOPEN_RETRY_COUNT_DEFAULT;
+    private static int lanReopenRetryIntervalTicks = LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT;
+    private static boolean lanReopenAllowRandomPortFallback = LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT;
+    private static boolean autoReconnectLanClientAfterRestore = AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT;
+    private static int lanClientReconnectInitialDelayTicks = LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT;
+    private static int lanClientReconnectIntervalTicks = LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT;
+    private static int lanClientReconnectMaxDurationTicks = LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT;
 
     private Config() {
     }
@@ -41,6 +59,22 @@ public class Config {
             configId = normalizeConfigId(props.getProperty("configId"));
             worldIndex = parseInt(props.getProperty("worldIndex"), -1);
             internalTime = parseInt(props.getProperty("internalTime"), -1);
+            autoReopenLanAfterRestore = parseBoolean(props.getProperty("autoReopenLanAfterRestore"),
+                AUTO_REOPEN_LAN_AFTER_RESTORE_DEFAULT);
+            lanReopenRetryCount = clamp(parseInt(props.getProperty("lanReopenRetryCount"),
+                LAN_REOPEN_RETRY_COUNT_DEFAULT), 1, 30);
+            lanReopenRetryIntervalTicks = clamp(parseInt(props.getProperty("lanReopenRetryIntervalTicks"),
+                LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT), 10, 200);
+            lanReopenAllowRandomPortFallback = parseBoolean(props.getProperty("lanReopenAllowRandomPortFallback"),
+                LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT);
+            autoReconnectLanClientAfterRestore = parseBoolean(props.getProperty("autoReconnectLanClientAfterRestore"),
+                AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT);
+            lanClientReconnectInitialDelayTicks = clamp(parseInt(props.getProperty("lanClientReconnectInitialDelayTicks"),
+                LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT), 40, 600);
+            lanClientReconnectIntervalTicks = clamp(parseInt(props.getProperty("lanClientReconnectIntervalTicks"),
+                LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT), 20, 200);
+            lanClientReconnectMaxDurationTicks = clamp(parseInt(props.getProperty("lanClientReconnectMaxDurationTicks"),
+                LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT), 200, 7200);
         } catch (IOException e) {
             MineBackup.LOGGER.error("Failed to load config", e);
             clearInMemory();
@@ -55,6 +89,14 @@ public class Config {
         }
         props.setProperty("worldIndex", String.valueOf(worldIndex));
         props.setProperty("internalTime", String.valueOf(internalTime));
+        props.setProperty("autoReopenLanAfterRestore", String.valueOf(autoReopenLanAfterRestore));
+        props.setProperty("lanReopenRetryCount", String.valueOf(lanReopenRetryCount));
+        props.setProperty("lanReopenRetryIntervalTicks", String.valueOf(lanReopenRetryIntervalTicks));
+        props.setProperty("lanReopenAllowRandomPortFallback", String.valueOf(lanReopenAllowRandomPortFallback));
+        props.setProperty("autoReconnectLanClientAfterRestore", String.valueOf(autoReconnectLanClientAfterRestore));
+        props.setProperty("lanClientReconnectInitialDelayTicks", String.valueOf(lanClientReconnectInitialDelayTicks));
+        props.setProperty("lanClientReconnectIntervalTicks", String.valueOf(lanClientReconnectIntervalTicks));
+        props.setProperty("lanClientReconnectMaxDurationTicks", String.valueOf(lanClientReconnectMaxDurationTicks));
 
         try (Writer writer = Files.newBufferedWriter(configPath, StandardCharsets.UTF_8)) {
             props.store(writer, "MineBackup Auto Config");
@@ -91,10 +133,50 @@ public class Config {
         return internalTime;
     }
 
+    public static boolean isAutoReopenLanAfterRestore() {
+        return autoReopenLanAfterRestore;
+    }
+
+    public static int getLanReopenRetryCount() {
+        return lanReopenRetryCount;
+    }
+
+    public static int getLanReopenRetryIntervalTicks() {
+        return lanReopenRetryIntervalTicks;
+    }
+
+    public static boolean isLanReopenAllowRandomPortFallback() {
+        return lanReopenAllowRandomPortFallback;
+    }
+
+    public static boolean isAutoReconnectLanClientAfterRestore() {
+        return autoReconnectLanClientAfterRestore;
+    }
+
+    public static int getLanClientReconnectInitialDelayTicks() {
+        return lanClientReconnectInitialDelayTicks;
+    }
+
+    public static int getLanClientReconnectIntervalTicks() {
+        return lanClientReconnectIntervalTicks;
+    }
+
+    public static int getLanClientReconnectMaxDurationTicks() {
+        return lanClientReconnectMaxDurationTicks;
+    }
+
     private static void clearInMemory() {
         configId = null;
         worldIndex = -1;
         internalTime = -1;
+        autoReopenLanAfterRestore = AUTO_REOPEN_LAN_AFTER_RESTORE_DEFAULT;
+        lanReopenRetryCount = LAN_REOPEN_RETRY_COUNT_DEFAULT;
+        lanReopenRetryIntervalTicks = LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT;
+        lanReopenAllowRandomPortFallback = LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT;
+        autoReconnectLanClientAfterRestore = AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT;
+        lanClientReconnectInitialDelayTicks = LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT;
+        lanClientReconnectIntervalTicks = LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT;
+        lanClientReconnectMaxDurationTicks = LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT;
     }
 
     private static String normalizeConfigId(String value) {
@@ -114,5 +196,16 @@ public class Config {
         } catch (NumberFormatException ex) {
             return fallback;
         }
+    }
+
+    private static boolean parseBoolean(String value, boolean fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        return Boolean.parseBoolean(value.trim());
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 }

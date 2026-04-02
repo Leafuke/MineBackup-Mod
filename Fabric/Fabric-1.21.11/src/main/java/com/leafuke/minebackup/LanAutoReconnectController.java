@@ -62,7 +62,9 @@ public final class LanAutoReconnectController {
 
         reconnectCauseLooksRestore = isLikelyRestoreKick(client.screen);
         reconnectScheduled = true;
-        reconnectWaitTicks = Config.getLanClientReconnectIntervalTicks();
+        reconnectWaitTicks = Math.max(
+            Config.getLanClientReconnectInitialDelayTicks(),
+            Config.getLanClientReconnectIntervalTicks());
         reconnectElapsedTicks = 0;
         reconnectAttempts = 0;
 
