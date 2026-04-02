@@ -15,7 +15,11 @@ public class MineBackupClient {
 
     public static void initialize() {
         Config.load();
-        UPDATE_CHECKER.start();
+        if (Config.isUpdateCheckEnabled()) {
+            UPDATE_CHECKER.start();
+        } else {
+            MineBackup.LOGGER.info("Auto update check is disabled by config.");
+        }
         MinecraftForge.EVENT_BUS.register(new MineBackupClient());
     }
 
@@ -71,6 +75,9 @@ public class MineBackupClient {
     }
 
     private void tryShowUpdateMessage(Minecraft client) {
+        if (!Config.isUpdateCheckEnabled()) {
+            return;
+        }
         if (updatePromptShown || client == null || client.player == null || client.level == null) {
             return;
         }

@@ -15,7 +15,11 @@ public class MineBackupClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         Config.load();
-        UPDATE_CHECKER.start();
+        if (Config.isUpdateCheckEnabled()) {
+            UPDATE_CHECKER.start();
+        } else {
+            MineBackup.LOGGER.info("Auto update check is disabled by config.");
+        }
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
     }
 
@@ -65,6 +69,9 @@ public class MineBackupClient implements ClientModInitializer {
     }
 
     private void tryShowUpdateMessage(MinecraftClient client) {
+        if (!Config.isUpdateCheckEnabled()) {
+            return;
+        }
         if (updatePromptShown || client == null || client.player == null || client.world == null) {
             return;
         }

@@ -389,7 +389,7 @@ public class Command {
     private static String requireSingleQuotedString(CommandContext<ServerCommandSource> ctx, String argumentName) {
         String rawArgument = getRawArgument(ctx, argumentName);
         if (rawArgument == null || rawArgument.length() < 2 || rawArgument.charAt(0) != '\'' || rawArgument.charAt(rawArgument.length() - 1) != '\'') {
-            ctx.getSource().sendError(Text.literal("Backup file must use single quotes, for example: 'backup.7z'"));
+            ctx.getSource().sendError(Text.translatable("minebackup.message.command.backup_file_single_quotes"));
             return null;
         }
         return StringArgumentType.getString(ctx, argumentName);

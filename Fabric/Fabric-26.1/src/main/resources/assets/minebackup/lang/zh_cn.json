@@ -85,6 +85,32 @@
   "minebackup.message.plugin_link_prefix": "§7插件说明与下载入口：",
   "minebackup.message.plugin_link_hover": "打开 MineBackup 插件页面",
   "minebackup.message.update.available": "§e[MineBackup] 检测到新版本：§f%s§e，点击打开发布页。",
-  "minebackup.message.update.hover": "打开最新的 MineBackup-Mod 发布页"
+  "minebackup.message.update.hover": "打开最新的 MineBackup-Mod 发布页",
+  "minebackup.message.command.backup_file_single_quotes": "§c备份文件必须使用单引号，例如：§f'backup.7z'",
+
+  "minebackup.help.root.title": "§6MineBackup 指令帮助",
+  "minebackup.help.root.entry": "\n §7- §f%s §7| §a%s",
+  "minebackup.help.root.footer": "\n§8使用 §f/mb help <command> §8查看详情。",
+  "minebackup.help.command.title": "§6帮助: §f/mb %s",
+  "minebackup.help.command.summary": "\n§7说明: §a%s",
+  "minebackup.help.command.usage": "\n§7用法: §f%s",
+  "minebackup.help.command.aliases": "\n§7别名: §f%s",
+  "minebackup.help.command.example": "\n§7示例: §f%s",
+  "minebackup.help.command.unknown": "§c未知指令: §f%s",
+  "minebackup.help.suggest.alias": "%s 的别名",
+
+  "minebackup.help.summary.quickbackup": "备份当前世界",
+  "minebackup.help.summary.quickrestore": "还原当前世界（仅限单机/局域网）",
+  "minebackup.help.summary.save": "本地完整保存世界数据",
+  "minebackup.help.summary.auto": "启动自动备份",
+  "minebackup.help.summary.stop": "停止自动备份",
+  "minebackup.help.summary.list_configs": "列出备份配置",
+  "minebackup.help.summary.list_worlds": "列出配置中的世界",
+  "minebackup.help.summary.list_backups": "列出世界备份",
+  "minebackup.help.summary.backup": "备份指定世界",
+  "minebackup.help.summary.restore": "还原指定世界（仅限单机/局域网）",
+  "minebackup.help.summary.freeze": "保存后冻结自动保存（仅限单机/局域网）",
+  "minebackup.help.summary.unfreeze": "恢复自动保存（仅限单机/局域网）",
+  "minebackup.help.summary.snap": "将备份加入 WE 快照"
 }
 

@@ -85,6 +85,32 @@
   "minebackup.message.plugin_link_prefix": "§7Install or learn about the plugin here: ",
   "minebackup.message.plugin_link_hover": "Open the MineBackup plugin page",
   "minebackup.message.update.available": "§e[MineBackup] A newer version is available: §f%s§e. Click to open releases.",
-  "minebackup.message.update.hover": "Open the latest MineBackup-Mod release"
+  "minebackup.message.update.hover": "Open the latest MineBackup-Mod release",
+  "minebackup.message.command.backup_file_single_quotes": "§cBackup file must use single quotes, for example: §f'backup.7z'",
+
+  "minebackup.help.root.title": "§6MineBackup Commands",
+  "minebackup.help.root.entry": "\n §7- §f%s §7| §a%s",
+  "minebackup.help.root.footer": "\n§8Use §f/mb help <command> §8for details.",
+  "minebackup.help.command.title": "§6Help: §f/mb %s",
+  "minebackup.help.command.summary": "\n§7Description: §a%s",
+  "minebackup.help.command.usage": "\n§7Usage: §f%s",
+  "minebackup.help.command.aliases": "\n§7Aliases: §f%s",
+  "minebackup.help.command.example": "\n§7Example: §f%s",
+  "minebackup.help.command.unknown": "§cUnknown command: §f%s",
+  "minebackup.help.suggest.alias": "Alias of %s",
+
+  "minebackup.help.summary.quickbackup": "Backup the current world",
+  "minebackup.help.summary.quickrestore": "Restore the current world (singleplayer/LAN only)",
+  "minebackup.help.summary.save": "Save world data locally",
+  "minebackup.help.summary.auto": "Start auto backup",
+  "minebackup.help.summary.stop": "Stop auto backup",
+  "minebackup.help.summary.list_configs": "List backup configs",
+  "minebackup.help.summary.list_worlds": "List worlds in a config",
+  "minebackup.help.summary.list_backups": "List backups for a world",
+  "minebackup.help.summary.backup": "Create a backup for a selected world",
+  "minebackup.help.summary.restore": "Restore a selected world (singleplayer/LAN only)",
+  "minebackup.help.summary.freeze": "Save and freeze autosave (singleplayer/LAN only)",
+  "minebackup.help.summary.unfreeze": "Resume autosave (singleplayer/LAN only)",
+  "minebackup.help.summary.snap": "Add a backup to WE snapshot"
 }
 
