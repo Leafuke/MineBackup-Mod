@@ -16,7 +16,10 @@ import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.storage.LevelResource;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
@@ -130,6 +133,7 @@ public class Command {
                             if (handleDedicatedRestoreUnsupported(ctx.getSource())) {
                                 return 1;
                             }
+                            warnAboutVoxyBeforeRestore(ctx.getSource());
                             return executeRemoteCommand(ctx.getSource(), "RESTORE_CURRENT_LATEST");
                         })
                         .then(Commands.argument("backup_file", StringArgumentType.string())
@@ -297,6 +301,17 @@ public class Command {
                 ? "BACKUP_CURRENT"
                 : String.format("BACKUP_CURRENT %s", comment);
         return executeRemoteCommand(source, command);
+    }
+
+    private static void warnAboutVoxyBeforeRestore(CommandSourceStack source) {
+        if (source == null || source.getServer() == null) {
+            return;
+        }
+
+        Path voxyDir = source.getServer().getWorldPath(LevelResource.ROOT).resolve("voxy");
+        if (Files.isDirectory(voxyDir)) {
+            source.sendSystemMessage(Component.translatable("minebackup.message.command.voxy_may_cause_issues"));
+        }
     }
 
     private static void queryBackend(String command, java.util.function.Consumer<String> callback) {

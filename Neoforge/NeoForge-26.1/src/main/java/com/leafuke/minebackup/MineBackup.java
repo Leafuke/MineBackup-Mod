@@ -34,7 +34,7 @@ import java.util.Map;
 public class MineBackup {
     public static final String MOD_ID = "minebackup";
     public static final String PLUGIN_GUIDE_URL = "https://modrinth.com/plugin/minebackupplugin";
-    public static final String MOD_VERSION = "2.1.0";
+    public static final String MOD_VERSION = "2.1.1";
     private static final String MIN_MAIN_PROGRAM_VERSION = "1.14.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
@@ -44,6 +44,7 @@ public class MineBackup {
     private static final String QUERIER_SOCKET_ID = "0x00000010";
     private static final long INTEGRATED_RESTORE_ACK_POLL_MS = 100L;
     private static final long INTEGRATED_RESTORE_ACK_TIMEOUT_MS = 10_000L;
+    private static final int INTEGRATED_RESTORE_ACK_READY_STREAK = 3;
 
     private static SignalSubscriber knotLinkSubscriber;
     private static volatile MinecraftServer serverInstance;
@@ -316,6 +317,10 @@ public class MineBackup {
             handleRestoreFinished(eventData, eventType);
             return;
         }
+        if ("restore_cancelled".equals(eventType)) {
+            handleRestoreCancelled(eventData);
+            return;
+        }
         if ("rejoin_world".equals(eventType)) {
             handleRejoinWorld(eventData);
             return;
@@ -372,7 +377,7 @@ public class MineBackup {
                 LOGGER.warn("Ignoring unsupported dedicated-server restore event: {}", eventType);
                 broadcastDedicatedRestoreUnsupported();
             }
-            case "restore_started", "restore_finished", "restore_success", "rejoin_world" ->
+            case "restore_started", "restore_finished", "restore_success", "restore_cancelled", "rejoin_world" ->
                     LOGGER.warn("Ignoring unsupported dedicated-server restore event: {}", eventType);
             default -> LOGGER.info("Ignoring unsupported backend event on dedicated server: {}", eventType);
         }
@@ -445,7 +450,13 @@ public class MineBackup {
             HotRestoreState.waitingForServerStopAck = true;
 
             if (serverInstance.isDedicatedServer()) {
-                LocalSaveCoordinator.saveForLocalCommand(serverInstance);
+                boolean saved = LocalSaveCoordinator.saveForLocalCommand(serverInstance);
+                if (!saved) {
+                    LOGGER.error("Failed to save world before dedicated restore handshake. Cancelling restore flow.");
+                    HotRestoreState.reset();
+                    return;
+                }
+
                 Component kickMessage = Component.translatable("minebackup.message.restore.kick");
                 disconnectPlayersForRestore(kickMessage, false);
                 new Thread(() -> {
@@ -459,9 +470,16 @@ public class MineBackup {
             captureLanStateBeforeRestore(serverInstance);
 
             String levelId = resolveRejoinLevelId(serverInstance, eventData.get("world"));
+            boolean saved = LocalSaveCoordinator.saveForLocalCommand(serverInstance);
+            if (!saved) {
+                LOGGER.error("Failed to save world before hot restore. Restore handshake will be cancelled.");
+                serverInstance.getPlayerList().broadcastSystemMessage(Component.translatable("minebackup.message.restore.failed"), false);
+                MineBackupClient.resetRestoreState();
+                return;
+            }
+
             MineBackupClient.setWorldToRejoin(levelId);
             HotRestoreState.levelIdToRejoin = levelId;
-            LocalSaveCoordinator.saveForLocalCommand(serverInstance);
 
             Component kickMessage = Component.translatable("minebackup.message.restore.kick");
             disconnectPlayersForRestore(kickMessage, true);
@@ -498,6 +516,10 @@ public class MineBackup {
     private void handleRestoreFinished(Map<String, String> eventData, String eventType) {
         String status = "restore_success".equals(eventType) ? "success" : eventData.getOrDefault("status", "success");
         if (!"success".equals(status)) {
+            if (serverInstance != null) {
+                serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(
+                        Component.translatable("minebackup.message.restore.failed_status"), false));
+            }
             MineBackupClient.clearReadyToRejoin();
             MineBackupClient.resetRestoreState();
             return;
@@ -520,6 +542,22 @@ public class MineBackup {
         }
         HotRestoreState.waitingForServerStopAck = false;
         MineBackupClient.showRestoreSuccessOverlay();
+    }
+
+    private void handleRestoreCancelled(Map<String, String> eventData) {
+        String reason = eventData.getOrDefault("reason", "unknown");
+        LOGGER.warn("Restore was cancelled by backend. reason={}", reason);
+
+        if (serverInstance != null) {
+            serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(
+                    Component.translatable("minebackup.message.restore.failed"), false));
+        }
+
+        if (serverInstance != null && !serverInstance.isDedicatedServer()) {
+            MineBackupClient.resetRestoreState();
+        } else {
+            HotRestoreState.reset();
+        }
     }
 
     private void handleRejoinWorld(Map<String, String> eventData) {
@@ -592,16 +630,38 @@ public class MineBackup {
     private void startIntegratedRestoreAckWatcher(MinecraftServer restoreServer) {
         new Thread(() -> {
             long startAt = System.currentTimeMillis();
+            int readyStreak = 0;
             while (true) {
-                if (isIntegratedRestoreReadyForAck(restoreServer)) {
-                    sendWorldSaveAndExitAck();
+                if (!HotRestoreState.waitingForServerStopAck || !HotRestoreState.isRestoring) {
+                    LOGGER.info("Restore ACK watcher stopped because restore flow is no longer waiting for ACK.");
                     return;
+                }
+
+                if (isIntegratedRestoreReadyForAck(restoreServer)) {
+                    readyStreak++;
+                    if (readyStreak >= INTEGRATED_RESTORE_ACK_READY_STREAK) {
+                        sendWorldSaveAndExitAck();
+                        return;
+                    }
+                } else {
+                    readyStreak = 0;
                 }
 
                 long elapsed = System.currentTimeMillis() - startAt;
                 if (elapsed >= INTEGRATED_RESTORE_ACK_TIMEOUT_MS) {
-                    LOGGER.warn("Timed out waiting integrated server release for restore ACK after {}ms.", elapsed);
-                    sendWorldSaveAndExitAck();
+                    LOGGER.error("Timed out waiting integrated server release for restore ACK after {}ms. Cancelling restore handshake to avoid premature restore while world files may still be locked.", elapsed);
+
+                    if (serverInstance != null) {
+                        serverInstance.execute(() -> serverInstance.getPlayerList().broadcastSystemMessage(
+                                Component.translatable("minebackup.message.restore.failed"), false));
+                    }
+
+                    if (serverInstance != null && !serverInstance.isDedicatedServer()) {
+                        MineBackupClient.resetRestoreState();
+                    } else {
+                        HotRestoreState.reset();
+                    }
+
                     return;
                 }
 
@@ -623,7 +683,11 @@ public class MineBackup {
             return false;
         }
 
-        return canAcquireSessionLock(restoreServer);
+        if (!canAcquireSessionLock(restoreServer)) {
+            return false;
+        }
+
+        return canAccessCriticalWorldFiles(restoreServer);
     }
 
     private boolean canAcquireSessionLock(MinecraftServer restoreServer) {
@@ -645,6 +709,49 @@ public class MineBackup {
                     return false;
                 }
             }
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean canAccessCriticalWorldFiles(MinecraftServer restoreServer) {
+        try {
+            Path root = restoreServer.getWorldPath(LevelResource.ROOT);
+            if (root == null) {
+                return false;
+            }
+
+            if (!canOpenForWrite(root.resolve("level.dat"))) {
+                return false;
+            }
+            if (!canOpenForWrite(root.resolve("level.dat_old"))) {
+                return false;
+            }
+
+            Path regionDir = root.resolve("region");
+            if (!Files.isDirectory(regionDir)) {
+                return true;
+            }
+
+            try (java.util.stream.Stream<Path> stream = Files.list(regionDir)) {
+                Path sampleRegion = stream
+                        .filter(Files::isRegularFile)
+                        .findFirst()
+                        .orElse(null);
+                return sampleRegion == null || canOpenForWrite(sampleRegion);
+            }
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean canOpenForWrite(Path file) {
+        if (file == null || !Files.exists(file) || !Files.isRegularFile(file)) {
+            return true;
+        }
+
+        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.WRITE)) {
+            return true;
         } catch (Exception e) {
             return false;
         }

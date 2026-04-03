@@ -24,11 +24,12 @@
   "minebackup.message.list_backups.empty": "\n§7(此世界没有备份)",
   "minebackup.message.list_backups.fail": "§c读取备份列表失败: §f%s",
 
+  "minebackup.message.command.voxy_may_cause_issues": "§e警告: voxy 模组可能导致热还原失败。",
   "minebackup.message.command.sent": "§7已发送到 MineBackup: §f%s",
   "minebackup.message.command.fail": "§c执行失败: §f%s",
   "minebackup.message.command.invalid": "§c无效指令。",
   "minebackup.message.command.migrated": "§7旧指令入口已迁移到 §f/mb§7。",
-  "minebackup.message.communication_failed": "通信失败",
+  "minebackup.message.communication_failed": "通信失败，请重试。请确保安装了 KnotLink。\nhttps://github.com/hxh230802/KnotLink/releases",
   "minebackup.message.no_response": "无响应",
   "minebackup.message.unknown_world": "未知世界",
   "minebackup.message.unknown_file": "未知文件",

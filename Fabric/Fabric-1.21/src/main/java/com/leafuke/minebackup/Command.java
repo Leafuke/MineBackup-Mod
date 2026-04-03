@@ -15,7 +15,10 @@ import net.minecraft.text.ClickEvent;
 import net.minecraft.text.HoverEvent;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
+import net.minecraft.util.WorldSavePath;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
@@ -129,6 +132,7 @@ public class Command {
                             if (handleDedicatedRestoreUnsupported(ctx.getSource())) {
                                 return 1;
                             }
+                            warnAboutVoxyBeforeRestore(ctx.getSource());
                             return executeRemoteCommand(ctx.getSource(), "RESTORE_CURRENT_LATEST");
                         })
                         .then(CommandManager.argument("backup_file", StringArgumentType.string())
@@ -296,6 +300,17 @@ public class Command {
                 ? "BACKUP_CURRENT"
                 : String.format("BACKUP_CURRENT %s", comment);
         return executeRemoteCommand(source, command);
+    }
+
+    private static void warnAboutVoxyBeforeRestore(ServerCommandSource source) {
+        if (source == null || source.getServer() == null) {
+            return;
+        }
+
+        Path voxyDir = source.getServer().getSavePath(WorldSavePath.ROOT).resolve("voxy");
+        if (Files.isDirectory(voxyDir)) {
+            source.sendFeedback(() -> Text.translatable("minebackup.message.command.voxy_may_cause_issues"), false);
+        }
     }
 
     private static void queryBackend(String command, java.util.function.Consumer<String> callback) {
