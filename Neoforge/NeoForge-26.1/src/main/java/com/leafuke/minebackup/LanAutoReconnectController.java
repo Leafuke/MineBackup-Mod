@@ -6,14 +6,19 @@ import net.minecraft.client.gui.screens.DisconnectedScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 
 public final class LanAutoReconnectController {
+    private static final String RESTORE_KICK_KEY = "minebackup.message.restore.kick";
+
     private static volatile boolean lanSessionObserved;
     private static volatile boolean reconnectScheduled;
+    private static volatile boolean reconnectCauseLooksRestore;
 
     private static ServerData lastLanServerData;
     private static String lastLanServerIp;
@@ -32,6 +37,11 @@ public final class LanAutoReconnectController {
 
         if (client.level != null) {
             trackLanSession(client);
+            return;
+        }
+
+        if (shouldDeferToHostRejoinFlow()) {
+            stopReconnect(true);
             return;
         }
 
@@ -59,6 +69,12 @@ public final class LanAutoReconnectController {
             return;
         }
 
+        reconnectCauseLooksRestore = isLikelyRestoreKick(client.screen);
+        if (!reconnectCauseLooksRestore) {
+            stopReconnect(true);
+            return;
+        }
+
         reconnectScheduled = true;
         reconnectWaitTicks = Math.max(
                 Config.getLanClientReconnectInitialDelayTicks(),
@@ -72,6 +88,7 @@ public final class LanAutoReconnectController {
     private static void trackLanSession(Minecraft client) {
         ServerData current = client.getCurrentServer();
         if (!isLanServer(current)) {
+            stopReconnect(true);
             return;
         }
 
@@ -85,6 +102,7 @@ public final class LanAutoReconnectController {
         lastLanServerIp = ip;
 
         reconnectScheduled = false;
+        reconnectCauseLooksRestore = false;
         reconnectWaitTicks = 0;
         reconnectElapsedTicks = 0;
         reconnectAttempts = 0;
@@ -273,22 +291,57 @@ public final class LanAutoReconnectController {
 
     private static void stopReconnect(boolean clearLanSession) {
         reconnectScheduled = false;
+        reconnectCauseLooksRestore = false;
         reconnectWaitTicks = 0;
         reconnectElapsedTicks = 0;
         reconnectAttempts = 0;
 
         if (clearLanSession) {
-            lanSessionObserved = false;
-            lastLanServerData = null;
-            lastLanServerIp = null;
+            clearLanSessionState();
         }
+    }
+
+    private static void clearLanSessionState() {
+        lanSessionObserved = false;
+        lastLanServerData = null;
+        lastLanServerIp = null;
     }
 
     private static void clearDisconnectedState() {
         reconnectScheduled = false;
+        reconnectCauseLooksRestore = false;
         reconnectWaitTicks = 0;
         reconnectElapsedTicks = 0;
         reconnectAttempts = 0;
+    }
+
+    private static boolean shouldDeferToHostRejoinFlow() {
+        return !isBlank(MineBackupClient.getWorldToRejoin());
+    }
+
+    private static boolean isLikelyRestoreKick(Screen screen) {
+        if (screen == null) {
+            return false;
+        }
+        return containsTranslatableKey(screen.getNarrationMessage(), RESTORE_KICK_KEY);
+    }
+
+    private static boolean containsTranslatableKey(Component component, String key) {
+        if (component == null || key == null) {
+            return false;
+        }
+
+        if (component.getContents() instanceof TranslatableContents translatable && key.equals(translatable.getKey())) {
+            return true;
+        }
+
+        for (Component sibling : component.getSiblings()) {
+            if (containsTranslatableKey(sibling, key)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static boolean isBlank(String value) {

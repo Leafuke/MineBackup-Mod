@@ -36,6 +36,11 @@ public final class LanAutoReconnectController {
             return;
         }
 
+        if (shouldDeferToHostRejoinFlow()) {
+            stopReconnect(true);
+            return;
+        }
+
         if (reconnectScheduled) {
             tickReconnect(client);
             return;
@@ -61,6 +66,11 @@ public final class LanAutoReconnectController {
         }
 
         reconnectCauseLooksRestore = isLikelyRestoreKick(client.screen);
+        if (!reconnectCauseLooksRestore) {
+            stopReconnect(true);
+            return;
+        }
+
         reconnectScheduled = true;
         reconnectWaitTicks = Math.max(
             Config.getLanClientReconnectInitialDelayTicks(),
@@ -76,6 +86,7 @@ public final class LanAutoReconnectController {
     private static void trackLanSession(Minecraft client) {
         ServerData current = client.getCurrentServer();
         if (current == null || !current.isLan()) {
+            stopReconnect(true);
             return;
         }
 
@@ -162,8 +173,14 @@ public final class LanAutoReconnectController {
         reconnectAttempts = 0;
 
         if (clearLanSession) {
-            lanSessionObserved = false;
+            clearLanSessionState();
         }
+    }
+
+    private static void clearLanSessionState() {
+        lanSessionObserved = false;
+        lastLanServerIp = null;
+        lastLanServerName = null;
     }
 
     private static void clearDisconnectedState() {
@@ -172,6 +189,10 @@ public final class LanAutoReconnectController {
         reconnectWaitTicks = 0;
         reconnectElapsedTicks = 0;
         reconnectAttempts = 0;
+    }
+
+    private static boolean shouldDeferToHostRejoinFlow() {
+        return !isBlank(MineBackupClient.getWorldToRejoin());
     }
 
     private static boolean isLikelyRestoreKick(Screen screen) {

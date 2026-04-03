@@ -56,6 +56,15 @@ public final class ClientRejoinController {
             }
 
             rejoinCompletionTimeoutTicks++;
+            if (rejoinCompletionTimeoutTicks >= DISCONNECT_WAIT_TICKS
+                    && (client.screen instanceof TitleScreen || client.screen instanceof SelectWorldScreen)) {
+                waitingForRejoinCompletion = false;
+                rejoinCompletionTimeoutTicks = 0;
+                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure cancelled");
+                resetRestoreState();
+                return;
+            }
+
             if (rejoinCompletionTimeoutTicks >= REJOIN_COMPLETION_TIMEOUT_TICKS) {
                 waitingForRejoinCompletion = false;
                 rejoinCompletionTimeoutTicks = 0;

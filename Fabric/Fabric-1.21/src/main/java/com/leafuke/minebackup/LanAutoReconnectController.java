@@ -12,8 +12,11 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 
 public final class LanAutoReconnectController {
+    private static final String RESTORE_KICK_KEY = "minebackup.message.restore.kick";
+
     private static volatile boolean lanSessionObserved;
     private static volatile boolean reconnectScheduled;
+    private static volatile boolean reconnectCauseLooksRestore;
 
     private static ServerInfo lastLanServerEntry;
     private static String lastLanServerIp;
@@ -32,6 +35,11 @@ public final class LanAutoReconnectController {
 
         if (client.world != null) {
             trackLanSession(client);
+            return;
+        }
+
+        if (shouldDeferToHostRejoinFlow()) {
+            stopReconnect(true);
             return;
         }
 
@@ -59,6 +67,12 @@ public final class LanAutoReconnectController {
             return;
         }
 
+        reconnectCauseLooksRestore = isLikelyRestoreKick(client.currentScreen);
+        if (!reconnectCauseLooksRestore) {
+            stopReconnect(true);
+            return;
+        }
+
         reconnectScheduled = true;
         reconnectWaitTicks = Math.max(
                 Config.getLanClientReconnectInitialDelayTicks(),
@@ -72,6 +86,7 @@ public final class LanAutoReconnectController {
     private static void trackLanSession(MinecraftClient client) {
         ServerInfo current = client.getCurrentServerEntry();
         if (!isLanServer(current)) {
+            stopReconnect(true);
             return;
         }
 
@@ -85,6 +100,7 @@ public final class LanAutoReconnectController {
         lastLanServerIp = ip;
 
         reconnectScheduled = false;
+        reconnectCauseLooksRestore = false;
         reconnectWaitTicks = 0;
         reconnectElapsedTicks = 0;
         reconnectAttempts = 0;
@@ -247,22 +263,67 @@ public final class LanAutoReconnectController {
 
     private static void stopReconnect(boolean clearLanSession) {
         reconnectScheduled = false;
+        reconnectCauseLooksRestore = false;
         reconnectWaitTicks = 0;
         reconnectElapsedTicks = 0;
         reconnectAttempts = 0;
 
         if (clearLanSession) {
-            lanSessionObserved = false;
-            lastLanServerEntry = null;
-            lastLanServerIp = null;
+            clearLanSessionState();
         }
+    }
+
+    private static void clearLanSessionState() {
+        lanSessionObserved = false;
+        lastLanServerEntry = null;
+        lastLanServerIp = null;
     }
 
     private static void clearDisconnectedState() {
         reconnectScheduled = false;
+        reconnectCauseLooksRestore = false;
         reconnectWaitTicks = 0;
         reconnectElapsedTicks = 0;
         reconnectAttempts = 0;
+    }
+
+    private static boolean shouldDeferToHostRejoinFlow() {
+        return !isBlank(MineBackupClient.getWorldToRejoin());
+    }
+
+    private static boolean isLikelyRestoreKick(Screen screen) {
+        if (screen == null) {
+            return false;
+        }
+
+        Object narration = invokeInstance(screen, "getNarrationMessage");
+        if (narration == null) {
+            narration = invokeInstance(screen, "getNarratedTitle");
+        }
+        return containsTranslatableKey(narration, RESTORE_KICK_KEY);
+    }
+
+    private static boolean containsTranslatableKey(Object textLike, String key) {
+        if (textLike == null || key == null) {
+            return false;
+        }
+
+        Object content = invokeInstance(textLike, "getContent");
+        Object translatableKey = invokeInstance(content, "getKey");
+        if (translatableKey instanceof String value && key.equals(value)) {
+            return true;
+        }
+
+        Object siblings = invokeInstance(textLike, "getSiblings");
+        if (siblings instanceof Iterable<?> iterable) {
+            for (Object sibling : iterable) {
+                if (containsTranslatableKey(sibling, key)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static boolean isBlank(String value) {

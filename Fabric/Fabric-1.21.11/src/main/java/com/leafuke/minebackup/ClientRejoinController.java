@@ -304,6 +304,7 @@ public final class ClientRejoinController {
             client.createWorldOpenFlows().openWorld(normalized, () -> {
                 waitingForRejoinCompletion = false;
                 OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure cancelled");
+                resetRestoreState();
                 client.setScreen(new TitleScreen());
             });
         } catch (Exception e) {
