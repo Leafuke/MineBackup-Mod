@@ -1,4 +1,4 @@
-package com.leafuke.minebackup.knotlink;
+package com.leafuke.minebackup.knotlink.protocol;
 
 public final class KnotLinkProtocolException extends Exception {
     public KnotLinkProtocolException(String message) {

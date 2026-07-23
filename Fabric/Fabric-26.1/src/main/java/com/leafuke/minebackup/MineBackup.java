@@ -1,6 +1,8 @@
 package com.leafuke.minebackup;
 
+import com.leafuke.minebackup.command.Command;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
+import com.leafuke.minebackup.runtime.MineBackupRuntime;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.network.chat.Component;

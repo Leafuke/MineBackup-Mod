@@ -1,7 +1,9 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.update;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.ModInfo;
 
 import java.net.URI;
 import java.net.http.HttpClient;

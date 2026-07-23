@@ -1,8 +1,13 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.runtime;
 
+import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.ModInfo;
+import com.leafuke.minebackup.client.ClientHooks;
+import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
-import com.leafuke.minebackup.knotlink.KnotLinkRequest;
+import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.restore.RestoreSession;
+import com.leafuke.minebackup.update.VersionNumber;
 import com.mojang.authlib.GameProfile;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;

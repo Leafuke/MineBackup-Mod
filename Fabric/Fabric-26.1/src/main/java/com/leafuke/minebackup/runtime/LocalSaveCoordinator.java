@@ -1,5 +1,6 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.runtime;
 
+import com.leafuke.minebackup.MineBackup;
 import net.minecraft.server.MinecraftServer;
 
 public final class LocalSaveCoordinator {

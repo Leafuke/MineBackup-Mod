@@ -1,4 +1,4 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.update;
 
 import java.util.Optional;
 import java.util.regex.Matcher;

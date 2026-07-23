@@ -1,6 +1,8 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.client;
 
-import com.leafuke.minebackup.knotlink.KnotLinkRequest;
+import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.config.Config;
+import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.restore.RestoreSession;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.GenericMessageScreen;

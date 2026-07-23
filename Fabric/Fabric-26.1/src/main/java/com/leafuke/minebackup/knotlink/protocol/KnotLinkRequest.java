@@ -1,4 +1,4 @@
-package com.leafuke.minebackup.knotlink;
+package com.leafuke.minebackup.knotlink.protocol;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

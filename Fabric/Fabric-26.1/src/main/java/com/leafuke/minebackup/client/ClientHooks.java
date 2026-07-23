@@ -1,4 +1,4 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.client;
 
 import com.leafuke.minebackup.restore.RestoreSession;
 import net.minecraft.network.chat.Component;

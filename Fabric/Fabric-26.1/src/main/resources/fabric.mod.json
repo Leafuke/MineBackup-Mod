@@ -19,7 +19,7 @@
 			"com.leafuke.minebackup.MineBackup"
 		],
 		"client": [
-			"com.leafuke.minebackup.MineBackupClient"
+			"com.leafuke.minebackup.client.MineBackupClient"
 		]
 	},
 	"depends": {

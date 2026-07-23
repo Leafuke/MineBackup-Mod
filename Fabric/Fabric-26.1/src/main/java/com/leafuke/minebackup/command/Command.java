@@ -1,7 +1,10 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.command;
 
-import com.leafuke.minebackup.knotlink.KnotLinkRequest;
-import com.leafuke.minebackup.knotlink.KnotLinkResponse;
+import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.config.Config;
+import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
+import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
+import com.leafuke.minebackup.runtime.LocalSaveCoordinator;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;

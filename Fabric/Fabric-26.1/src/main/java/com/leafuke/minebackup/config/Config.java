@@ -1,5 +1,6 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.config;
 
+import com.leafuke.minebackup.MineBackup;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;

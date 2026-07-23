@@ -1,5 +1,7 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.client;
 
+import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.config.Config;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.DisconnectedScreen;

@@ -1,4 +1,4 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.command;
 
 import com.mojang.brigadier.LiteralMessage;
 import com.mojang.brigadier.suggestion.Suggestions;

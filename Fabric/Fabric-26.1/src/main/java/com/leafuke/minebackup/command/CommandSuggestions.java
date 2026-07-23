@@ -1,7 +1,8 @@
-package com.leafuke.minebackup;
+package com.leafuke.minebackup.command;
 
-import com.leafuke.minebackup.knotlink.KnotLinkRequest;
-import com.leafuke.minebackup.knotlink.KnotLinkResponse;
+import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
+import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 import com.mojang.brigadier.LiteralMessage;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
