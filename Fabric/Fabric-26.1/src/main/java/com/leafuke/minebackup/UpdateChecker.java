@@ -8,103 +8,70 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
-public class UpdateChecker extends Thread {
-    private static final HttpClient CLIENT = HttpClient.newHttpClient();
-    private static final String RELEASE_API_URL = "https://api.github.com/repos/Leafuke/MineBackup-Mod/releases/latest";
-    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
+public final class UpdateChecker {
+    private static final URI RELEASE_API = URI.create(
+            "https://api.github.com/repos/Leafuke/MineBackup-Mod/releases/latest");
+    private static final Duration TIMEOUT = Duration.ofSeconds(10);
+    private static final HttpClient CLIENT = HttpClient.newBuilder()
+            .connectTimeout(TIMEOUT)
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
 
-    public volatile String latestVersion;
-    public volatile String latestReleaseUrl;
-    public volatile boolean needUpdate;
+    public CompletableFuture<Optional<Result>> check() {
+        HttpRequest request = HttpRequest.newBuilder(RELEASE_API)
+                .timeout(TIMEOUT)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "MineBackup-Mod/" + ModInfo.version())
+                .build();
 
-    public UpdateChecker() {
-        super("MineBackup-Update-Checker-Fabric-26.1");
-        setDaemon(true);
+        return CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(this::parseResponse)
+                .exceptionally(exception -> {
+                    MineBackup.LOGGER.warn("Failed to check MineBackup updates", exception);
+                    return Optional.empty();
+                });
     }
 
-    @Override
-    public void run() {
-        latestVersion = null;
-        latestReleaseUrl = null;
-        needUpdate = false;
+    private Optional<Result> parseResponse(HttpResponse<String> response) {
+        if (response.statusCode() != 200) {
+            MineBackup.LOGGER.warn("MineBackup update check returned HTTP {}.", response.statusCode());
+            return Optional.empty();
+        }
 
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(RELEASE_API_URL))
-                    .timeout(REQUEST_TIMEOUT)
-                    .header("Accept", "application/vnd.github+json")
-                    .header("User-Agent", "MineBackup-Mod/" + MineBackup.MOD_VERSION)
-                    .build();
-
-            HttpResponse<String> response = CLIENT.send(
-                    request,
-                    HttpResponse.BodyHandlers.ofString()
-            );
-
-            int statusCode = response.statusCode();
-            if (statusCode != 200) {
-                if (statusCode == 403) {
-                    MineBackup.LOGGER.warn("Update check skipped due to GitHub API rate limit (HTTP 403).");
-                } else {
-                    MineBackup.LOGGER.warn("Update check failed with HTTP status {}.", statusCode);
-                }
-                return;
+            JsonObject json = JsonParser.parseString(response.body()).getAsJsonObject();
+            if (!json.has("tag_name") || !json.has("html_url")) {
+                MineBackup.LOGGER.warn("MineBackup update response is missing required fields.");
+                return Optional.empty();
             }
 
-            JsonObject jsonObject = JsonParser.parseString(response.body()).getAsJsonObject();
-            if (!jsonObject.has("tag_name") || !jsonObject.has("html_url")) {
-                MineBackup.LOGGER.warn("Update check response is missing required fields.");
-                return;
+            String latestRaw = json.get("tag_name").getAsString();
+            URI releaseUri = URI.create(json.get("html_url").getAsString());
+            Optional<VersionNumber> latest = VersionNumber.parse(latestRaw);
+            Optional<VersionNumber> current = VersionNumber.parse(ModInfo.version());
+            if (latest.isEmpty() || current.isEmpty() || !isTrustedReleaseUri(releaseUri)) {
+                MineBackup.LOGGER.warn("MineBackup update response contains invalid version or URL.");
+                return Optional.empty();
             }
 
-            String fetchedVersion = jsonObject.get("tag_name").getAsString();
-            String fetchedReleaseUrl = jsonObject.get("html_url").getAsString();
-            if (fetchedVersion == null || fetchedVersion.isBlank()
-                    || fetchedReleaseUrl == null || fetchedReleaseUrl.isBlank()) {
-                MineBackup.LOGGER.warn("Update check response contains empty version or release URL.");
-                return;
-            }
-
-            latestVersion = fetchedVersion;
-            latestReleaseUrl = fetchedReleaseUrl;
-            needUpdate = compareVersions(normalize(latestVersion), normalize(MineBackup.MOD_VERSION)) > 0;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            MineBackup.LOGGER.warn("Update check interrupted.");
-        } catch (Exception e) {
-            MineBackup.LOGGER.warn("Failed to check updates: {}", e.getMessage());
+            return Optional.of(new Result(
+                    latestRaw,
+                    releaseUri,
+                    latest.get().compareTo(current.get()) > 0));
+        } catch (RuntimeException exception) {
+            MineBackup.LOGGER.warn("Failed to parse MineBackup update response", exception);
+            return Optional.empty();
         }
     }
 
-    private static String normalize(String version) {
-        if (version == null) {
-            return "";
-        }
-        return version.replaceFirst("^v", "").replaceAll("\\+.*$", "").trim();
+    private static boolean isTrustedReleaseUri(URI uri) {
+        return "https".equalsIgnoreCase(uri.getScheme())
+                && "github.com".equalsIgnoreCase(uri.getHost());
     }
 
-    private static int compareVersions(String left, String right) {
-        int[] a = parseVersionParts(left);
-        int[] b = parseVersionParts(right);
-        for (int i = 0; i < 3; i++) {
-            if (a[i] != b[i]) {
-                return Integer.compare(a[i], b[i]);
-            }
-        }
-        return 0;
-    }
-
-    private static int[] parseVersionParts(String version) {
-        String[] parts = version.split("\\.");
-        int[] result = new int[3];
-        for (int i = 0; i < Math.min(parts.length, 3); i++) {
-            try {
-                result[i] = Integer.parseInt(parts[i].trim());
-            } catch (NumberFormatException ignored) {
-                result[i] = 0;
-            }
-        }
-        return result;
+    public record Result(String latestVersion, URI releaseUri, boolean updateAvailable) {
     }
 }

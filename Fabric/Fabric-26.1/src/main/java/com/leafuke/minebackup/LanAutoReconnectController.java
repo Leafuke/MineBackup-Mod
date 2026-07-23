@@ -3,348 +3,147 @@ package com.leafuke.minebackup;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.DisconnectedScreen;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-
 public final class LanAutoReconnectController {
     private static final String RESTORE_KICK_KEY = "minebackup.message.restore.kick";
 
-    private static volatile boolean lanSessionObserved;
-    private static volatile boolean reconnectScheduled;
-    private static volatile boolean reconnectCauseLooksRestore;
-
-    private static ServerData lastLanServerData;
-    private static String lastLanServerIp;
-
-    private static int reconnectWaitTicks;
-    private static int reconnectElapsedTicks;
-    private static int reconnectAttempts;
+    private static ServerData lastLanServer;
+    private static String lastLanAddress;
+    private static boolean reconnecting;
+    private static int waitTicks;
+    private static int elapsedTicks;
+    private static int attempts;
 
     private LanAutoReconnectController() {
     }
 
     public static void onClientTick(Minecraft client) {
-        if (client == null) {
-            return;
-        }
-
         if (client.level != null) {
-            trackLanSession(client);
+            trackCurrentServer(client);
             return;
         }
 
-        if (shouldDeferToHostRejoinFlow()) {
-            stopReconnect(true);
+        Config.ClientReconnect config = Config.get().clientReconnect();
+        if (!config.enabled()) {
+            clearAll();
             return;
         }
-
-        if (reconnectScheduled) {
-            tickReconnect(client);
-            return;
-        }
-
-        if (!Config.isAutoReconnectLanClientAfterRestore()) {
-            clearDisconnectedState();
-            return;
-        }
-
         if (client.getSingleplayerServer() != null) {
-            clearDisconnectedState();
+            clearAll();
             return;
         }
-
-        if (!(client.screen instanceof DisconnectedScreen)) {
-            clearDisconnectedState();
+        if (reconnecting) {
+            tickReconnect(client, config);
             return;
         }
-
-        if (!lanSessionObserved || isBlank(lastLanServerIp) || lastLanServerData == null) {
-            return;
-        }
-
-        reconnectCauseLooksRestore = isLikelyRestoreKick(client.screen);
-        if (!reconnectCauseLooksRestore) {
-            stopReconnect(true);
-            return;
-        }
-
-        reconnectScheduled = true;
-        reconnectWaitTicks = Math.max(
-                Config.getLanClientReconnectInitialDelayTicks(),
-                Config.getLanClientReconnectIntervalTicks());
-        reconnectElapsedTicks = 0;
-        reconnectAttempts = 0;
-
-        MineBackup.LOGGER.info("Detected LAN disconnect. Starting auto reconnect.");
-    }
-
-    private static void trackLanSession(Minecraft client) {
-        ServerData current = client.getCurrentServer();
-        if (!isLanServer(current)) {
-            stopReconnect(true);
-            return;
-        }
-
-        String ip = readServerIp(current);
-        if (isBlank(ip)) {
-            return;
-        }
-
-        lanSessionObserved = true;
-        lastLanServerData = current;
-        lastLanServerIp = ip;
-
-        reconnectScheduled = false;
-        reconnectCauseLooksRestore = false;
-        reconnectWaitTicks = 0;
-        reconnectElapsedTicks = 0;
-        reconnectAttempts = 0;
-    }
-
-    private static void tickReconnect(Minecraft client) {
-        if (!Config.isAutoReconnectLanClientAfterRestore()) {
-            stopReconnect(true);
-            return;
-        }
-
-        if (client.level != null) {
-            stopReconnect(false);
-            return;
-        }
-
         if (client.screen instanceof ConnectScreen) {
             return;
         }
+        if (!(client.screen instanceof DisconnectedScreen disconnectedScreen)) {
+            clearAll();
+            return;
+        }
+        if (lastLanServer == null || lastLanAddress == null) {
+            return;
+        }
+        if (!containsTranslation(disconnectedScreen.getNarrationMessage(), RESTORE_KICK_KEY)) {
+            clearAll();
+            return;
+        }
 
+        reconnecting = true;
+        waitTicks = config.initialDelayTicks();
+        elapsedTicks = 0;
+        attempts = 0;
+        MineBackup.LOGGER.info("Detected MineBackup LAN restore disconnect; auto reconnect started.");
+    }
+
+    private static void trackCurrentServer(Minecraft client) {
+        ServerData current = client.getCurrentServer();
+        if (current == null || !current.isLan() || current.ip == null || current.ip.isBlank()) {
+            clearAll();
+            return;
+        }
+        lastLanServer = current;
+        lastLanAddress = current.ip;
+        resetReconnectCounters();
+    }
+
+    private static void tickReconnect(Minecraft client, Config.ClientReconnect config) {
+        elapsedTicks++;
+        if (elapsedTicks >= config.maxDurationTicks()) {
+            int timedOutAfter = elapsedTicks;
+            clearAll();
+            MineBackup.LOGGER.warn("LAN auto reconnect timed out after {} ticks.", timedOutAfter);
+            return;
+        }
+        if (client.screen instanceof ConnectScreen) {
+            return;
+        }
         if (!(client.screen instanceof DisconnectedScreen)) {
-            stopReconnect(true);
+            clearAll();
             return;
         }
-
-        reconnectElapsedTicks++;
-        if (reconnectElapsedTicks >= Config.getLanClientReconnectMaxDurationTicks()) {
-            stopReconnect(true);
-            MineBackup.LOGGER.warn("LAN auto reconnect timed out after {} ticks.", reconnectElapsedTicks);
+        if (waitTicks > 0) {
+            waitTicks--;
             return;
         }
-
-        if (reconnectWaitTicks > 0) {
-            reconnectWaitTicks--;
-            return;
-        }
-
         if (!attemptReconnect(client)) {
-            stopReconnect(true);
-            MineBackup.LOGGER.warn("LAN auto reconnect aborted due to invalid target address.");
+            clearAll();
             return;
         }
-
-        reconnectAttempts++;
-        reconnectWaitTicks = Config.getLanClientReconnectIntervalTicks();
+        attempts++;
+        waitTicks = config.retryIntervalTicks();
     }
 
     private static boolean attemptReconnect(Minecraft client) {
-        if (lastLanServerData == null || isBlank(lastLanServerIp)) {
+        if (lastLanServer == null || lastLanAddress == null || !ServerAddress.isValidAddress(lastLanAddress)) {
+            MineBackup.LOGGER.warn("LAN reconnect target is invalid.");
             return false;
-        }
-
-        ServerAddress address = parseServerAddress(lastLanServerIp);
-        if (address == null) {
-            return false;
-        }
-
-        MineBackup.LOGGER.info("LAN auto reconnect attempt {} to {}", reconnectAttempts + 1, lastLanServerIp);
-        return invokeConnectScreen(client, address, lastLanServerData);
-    }
-
-    private static ServerAddress parseServerAddress(String rawAddress) {
-        Object parsed = invokeStatic(ServerAddress.class, "parseString", rawAddress);
-        if (!(parsed instanceof ServerAddress)) {
-            parsed = invokeStatic(ServerAddress.class, "parse", rawAddress);
-        }
-        return parsed instanceof ServerAddress address ? address : null;
-    }
-
-    private static boolean invokeConnectScreen(Minecraft client, ServerAddress address, ServerData serverData) {
-        for (Method method : ConnectScreen.class.getMethods()) {
-            if (!Modifier.isStatic(method.getModifiers())) {
-                continue;
-            }
-            String methodName = method.getName();
-            if (!"startConnecting".equals(methodName) && !"connect".equals(methodName)) {
-                continue;
-            }
-
-            Class<?>[] paramTypes = method.getParameterTypes();
-            Object[] args = new Object[paramTypes.length];
-            boolean hasClient = false;
-            boolean hasAddress = false;
-            boolean hasServerData = false;
-
-            for (int i = 0; i < paramTypes.length; i++) {
-                Class<?> type = paramTypes[i];
-                if (Minecraft.class.isAssignableFrom(type)) {
-                    args[i] = client;
-                    hasClient = true;
-                } else if (ServerAddress.class.isAssignableFrom(type)) {
-                    args[i] = address;
-                    hasAddress = true;
-                } else if (ServerData.class.isAssignableFrom(type)) {
-                    args[i] = serverData;
-                    hasServerData = true;
-                } else if (Screen.class.isAssignableFrom(type)) {
-                    args[i] = client.screen;
-                } else if (type == boolean.class || type == Boolean.class) {
-                    args[i] = false;
-                } else {
-                    args[i] = null;
-                }
-            }
-
-            if (!hasClient || !hasAddress || !hasServerData) {
-                continue;
-            }
-
-            try {
-                method.invoke(null, args);
-                return true;
-            } catch (Exception ignored) {
-            }
-        }
-        return false;
-    }
-
-    private static boolean isLanServer(ServerData serverData) {
-        if (serverData == null) {
-            return false;
-        }
-
-        Object result = invokeInstance(serverData, "isLan");
-        if (result instanceof Boolean bool) {
-            return bool;
-        }
-
-        Object type = invokeInstance(serverData, "getServerType");
-        if (type == null) {
-            type = invokeField(serverData, "type");
-        }
-        return type != null && "LAN".equalsIgnoreCase(String.valueOf(type));
-    }
-
-    private static String readServerIp(ServerData serverData) {
-        Object value = invokeField(serverData, "ip");
-        if (value instanceof String text && !text.isBlank()) {
-            return text;
-        }
-
-        value = invokeInstance(serverData, "getIp");
-        if (value instanceof String text && !text.isBlank()) {
-            return text;
-        }
-
-        value = invokeInstance(serverData, "getAddress");
-        return value instanceof String text && !text.isBlank() ? text : null;
-    }
-
-    private static Object invokeField(Object instance, String fieldName) {
-        if (instance == null || fieldName == null) {
-            return null;
         }
         try {
-            Field field = instance.getClass().getField(fieldName);
-            return field.get(instance);
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private static Object invokeInstance(Object instance, String methodName) {
-        if (instance == null || methodName == null) {
-            return null;
-        }
-        try {
-            Method method = instance.getClass().getMethod(methodName);
-            return method.invoke(instance);
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private static Object invokeStatic(Class<?> owner, String methodName, String value) {
-        if (owner == null || methodName == null) {
-            return null;
-        }
-        try {
-            Method method = owner.getMethod(methodName, String.class);
-            return method.invoke(null, value);
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private static void stopReconnect(boolean clearLanSession) {
-        reconnectScheduled = false;
-        reconnectCauseLooksRestore = false;
-        reconnectWaitTicks = 0;
-        reconnectElapsedTicks = 0;
-        reconnectAttempts = 0;
-
-        if (clearLanSession) {
-            clearLanSessionState();
-        }
-    }
-
-    private static void clearLanSessionState() {
-        lanSessionObserved = false;
-        lastLanServerData = null;
-        lastLanServerIp = null;
-    }
-
-    private static void clearDisconnectedState() {
-        reconnectScheduled = false;
-        reconnectCauseLooksRestore = false;
-        reconnectWaitTicks = 0;
-        reconnectElapsedTicks = 0;
-        reconnectAttempts = 0;
-    }
-
-    private static boolean shouldDeferToHostRejoinFlow() {
-        return !isBlank(MineBackupClient.getWorldToRejoin());
-    }
-
-    private static boolean isLikelyRestoreKick(Screen screen) {
-        if (screen == null) {
+            ServerAddress address = ServerAddress.parseString(lastLanAddress);
+            ServerData target = new ServerData(lastLanServer.name, lastLanAddress, ServerData.Type.LAN);
+            target.copyFrom(lastLanServer);
+            MineBackup.LOGGER.info("LAN reconnect attempt {} to {}", attempts + 1, lastLanAddress);
+            ConnectScreen.startConnecting(client.screen, client, address, target, false, null);
+            return true;
+        } catch (RuntimeException exception) {
+            MineBackup.LOGGER.warn("Failed to start LAN reconnect", exception);
             return false;
         }
-        return containsTranslatableKey(screen.getNarrationMessage(), RESTORE_KICK_KEY);
     }
 
-    private static boolean containsTranslatableKey(Component component, String key) {
-        if (component == null || key == null) {
+    private static boolean containsTranslation(Component component, String key) {
+        if (component == null) {
             return false;
         }
-
-        if (component.getContents() instanceof TranslatableContents translatable && key.equals(translatable.getKey())) {
+        if (component.getContents() instanceof TranslatableContents translatable
+                && key.equals(translatable.getKey())) {
             return true;
         }
-
         for (Component sibling : component.getSiblings()) {
-            if (containsTranslatableKey(sibling, key)) {
+            if (containsTranslation(sibling, key)) {
                 return true;
             }
         }
-
         return false;
     }
 
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
+    private static void clearAll() {
+        lastLanServer = null;
+        lastLanAddress = null;
+        resetReconnectCounters();
+    }
+
+    private static void resetReconnectCounters() {
+        reconnecting = false;
+        waitTicks = 0;
+        elapsedTicks = 0;
+        attempts = 0;
     }
 }

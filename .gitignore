@@ -50,6 +50,7 @@ replay_*.log
 
 # External references and local downloads
 /Reference/
+/References/
 /Documentation-main (1).zip
 /fabric-docs-main (1).zip
 /Neoforge/NeoForge-1.21/TEMPLATE_LICENSE.txt

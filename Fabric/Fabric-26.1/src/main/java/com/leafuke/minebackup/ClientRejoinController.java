@@ -1,10 +1,9 @@
 package com.leafuke.minebackup;
 
-import com.leafuke.minebackup.knotlink.OpenSocketQuerier;
-import com.leafuke.minebackup.restore.HotRestoreState;
+import com.leafuke.minebackup.knotlink.KnotLinkRequest;
+import com.leafuke.minebackup.restore.RestoreSession;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.GenericMessageScreen;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
 import net.minecraft.client.server.IntegratedServer;
@@ -13,139 +12,209 @@ import net.minecraft.util.HttpUtil;
 import net.minecraft.world.level.GameType;
 
 public final class ClientRejoinController {
-    private static final String QUERIER_APP_ID = "0x00000020";
-    private static final String QUERIER_SOCKET_ID = "0x00000010";
     private static final int REJOIN_DELAY_TICKS = 40;
-    private static final int MAX_RETRY_COUNT = 5;
-    private static final int DISCONNECT_WAIT_TICKS = 20;
-    private static final int REJOIN_COMPLETION_TIMEOUT_TICKS = 600;
+    private static final int REJOIN_DEADLINE_TICKS = 500;
+    private static final int MAX_SYNCHRONOUS_ATTEMPTS = 3;
     private static final int LAN_REOPEN_INITIAL_DELAY_TICKS = 20;
 
-    private static volatile String worldToRejoin;
-    private static volatile boolean readyToRejoin;
-    private static volatile boolean disconnectInitiated;
-    private static volatile boolean waitingForRejoinCompletion;
+    private static State state = State.IDLE;
+    private static RestoreSession.RejoinInfo rejoinInfo;
+    private static int delayTicks;
+    private static int elapsedTicks;
+    private static int attempts;
+    private static boolean resultReported;
 
-    private static int rejoinTickCounter;
-    private static int retryCount;
-    private static int disconnectWaitTicks;
-    private static int rejoinCompletionTimeoutTicks;
-    private static volatile boolean pendingLanReopen;
+    private static boolean pendingLanReopen;
     private static int lanReopenWaitTicks;
-    private static int lanReopenAttemptCount;
+    private static int lanReopenAttempts;
     private static int lanReopenPort = -1;
-    private static boolean lanReopenTriedRandomFallback;
+    private static boolean randomFallbackTried;
 
     private ClientRejoinController() {
     }
 
-    public static void onClientTick(Minecraft client) {
-        tickPendingLanReopen(client);
+    public static void requestRejoin(Minecraft client, RestoreSession.RejoinInfo info) {
+        client.execute(() -> {
+            if (state != State.IDLE) {
+                MineBackup.LOGGER.warn("Rejected duplicate client rejoin request.");
+                return;
+            }
+            state = State.DELAYING;
+            resultReported = false;
+            String levelId = sanitizeLevelId(info.levelId());
+            if (levelId == null) {
+                finishFailure(client, "invalid_level_id");
+                return;
+            }
 
-        if (waitingForRejoinCompletion) {
+            rejoinInfo = new RestoreSession.RejoinInfo(levelId, info.reopenLan(), info.lanPort());
+            delayTicks = REJOIN_DELAY_TICKS;
+            elapsedTicks = 0;
+            attempts = 0;
+
             if (client.level != null) {
-                waitingForRejoinCompletion = false;
-                rejoinCompletionTimeoutTicks = 0;
-                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT success");
-                retryCount = 0;
-                worldToRejoin = null;
-                scheduleLanReopenAfterRestore(client);
-                HotRestoreState.reset();
-                return;
+                Component notice = Component.translatable("minebackup.message.restore.rejoining");
+                client.disconnect(new GenericMessageScreen(notice), false);
+                delayTicks = 20;
             }
+        });
+    }
 
-            rejoinCompletionTimeoutTicks++;
-            if (rejoinCompletionTimeoutTicks >= REJOIN_COMPLETION_TIMEOUT_TICKS) {
-                waitingForRejoinCompletion = false;
-                rejoinCompletionTimeoutTicks = 0;
-                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure timeout");
-                handleRejoinFailure(client, worldToRejoin == null ? "" : worldToRejoin,
-                        new IllegalStateException("Rejoin timed out after 30 seconds"));
+    public static void restoreFailed(Minecraft client, Component message) {
+        client.execute(() -> {
+            resetRejoinState();
+            resetLanReopenState();
+            if (client.player != null) {
+                client.player.sendSystemMessage(message);
+            } else {
+                client.setScreen(new GenericMessageScreen(message));
+            }
+        });
+    }
+
+    public static void onClientTick(Minecraft client) {
+        tickLanReopen(client);
+        if (state == State.IDLE) {
+            return;
+        }
+
+        elapsedTicks++;
+        if (elapsedTicks >= REJOIN_DEADLINE_TICKS) {
+            finishFailure(client, "timeout");
+            return;
+        }
+
+        if (state == State.OPENING) {
+            if (client.level != null && client.player != null) {
+                finishSuccess(client);
             }
             return;
         }
 
-        if (readyToRejoin && worldToRejoin != null) {
-            if (client.getSingleplayerServer() != null) {
+        if (client.getSingleplayerServer() != null) {
+            return;
+        }
+        if (delayTicks > 0) {
+            delayTicks--;
+            return;
+        }
+        attemptOpenWorld(client);
+    }
+
+    private static void attemptOpenWorld(Minecraft client) {
+        RestoreSession.RejoinInfo info = rejoinInfo;
+        if (info == null) {
+            finishFailure(client, "missing_session");
+            return;
+        }
+
+        String levelId = sanitizeLevelId(info.levelId());
+        if (levelId == null) {
+            finishFailure(client, "invalid_level_id");
+            return;
+        }
+
+        attempts++;
+        state = State.OPENING;
+        client.setScreen(new GenericMessageScreen(Component.translatable(
+                "minebackup.message.restore.rejoining")));
+        try {
+            client.createWorldOpenFlows().openWorld(levelId, () ->
+                    client.execute(() -> finishFailure(client, "cancelled")));
+        } catch (RuntimeException exception) {
+            MineBackup.LOGGER.warn(
+                    "Synchronous world rejoin attempt {}/{} failed",
+                    attempts,
+                    MAX_SYNCHRONOUS_ATTEMPTS,
+                    exception);
+            if (attempts < MAX_SYNCHRONOUS_ATTEMPTS
+                    && elapsedTicks + REJOIN_DELAY_TICKS < REJOIN_DEADLINE_TICKS) {
+                state = State.DELAYING;
+                delayTicks = REJOIN_DELAY_TICKS;
                 return;
             }
-
-            rejoinTickCounter++;
-            if (rejoinTickCounter >= REJOIN_DELAY_TICKS) {
-                rejoinTickCounter = 0;
-                readyToRejoin = false;
-                disconnectInitiated = false;
-                disconnectWaitTicks = 0;
-
-                String levelId = sanitizeLevelId(worldToRejoin);
-                if (levelId == null) {
-                    OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure invalid_level_id");
-                    resetRestoreState();
-                    return;
-                }
-
-                worldToRejoin = levelId;
-                client.execute(() -> attemptAutoRejoin(client, levelId));
-            }
-        } else {
-            rejoinTickCounter = 0;
-        }
-
-        if (disconnectInitiated && client.level == null) {
-            disconnectWaitTicks++;
-            if (disconnectWaitTicks >= DISCONNECT_WAIT_TICKS) {
-                disconnectInitiated = false;
-                disconnectWaitTicks = 0;
-                if (worldToRejoin != null) {
-                    readyToRejoin = true;
-                }
-            }
+            finishFailure(client, "max_retries_exceeded");
         }
     }
 
-    public static void setWorldToRejoin(String levelId) {
-        worldToRejoin = sanitizeLevelId(levelId);
-    }
-
-    public static String getWorldToRejoin() {
-        return worldToRejoin;
-    }
-
-    public static void markReadyToRejoin() {
-        if (worldToRejoin != null) {
-            readyToRejoin = true;
+    private static void finishSuccess(Minecraft client) {
+        if (state != State.OPENING) {
+            return;
+        }
+        RestoreSession.RejoinInfo completedInfo = rejoinInfo;
+        reportResult("success", null);
+        resetRejoinState();
+        if (completedInfo != null) {
+            scheduleLanReopen(completedInfo);
+        }
+        MineBackup.completeClientRestore();
+        if (client.player != null) {
+            client.player.sendSystemMessage(Component.translatable(
+                    "minebackup.message.restore.success_overlay"));
         }
     }
 
-    public static void clearReadyToRejoin() {
-        readyToRejoin = false;
-    }
-
-    public static boolean isReadyToRejoin() {
-        return readyToRejoin;
-    }
-
-    public static void resetRestoreState() {
-        worldToRejoin = null;
-        readyToRejoin = false;
-        disconnectInitiated = false;
-        waitingForRejoinCompletion = false;
-        rejoinTickCounter = 0;
-        retryCount = 0;
-        disconnectWaitTicks = 0;
-        rejoinCompletionTimeoutTicks = 0;
+    private static void finishFailure(Minecraft client, String reason) {
+        if (state == State.IDLE) {
+            return;
+        }
+        reportResult("failure", reason);
+        resetRejoinState();
         resetLanReopenState();
-        HotRestoreState.reset();
+        MineBackup.completeClientRestore();
+        try {
+            client.setScreen(new SelectWorldScreen(new TitleScreen()));
+        } catch (RuntimeException exception) {
+            MineBackup.LOGGER.warn("Failed to open world selection after restore failure", exception);
+            client.setScreen(new TitleScreen());
+        }
     }
 
-    private static void tickPendingLanReopen(Minecraft client) {
-        if (!pendingLanReopen) {
+    private static void reportResult(String result, String reason) {
+        if (resultReported) {
             return;
         }
-        if (client == null || client.level == null) {
-            return;
+        resultReported = true;
+        KnotLinkRequest request = KnotLinkRequest.command("REJOIN_RESULT")
+                .conversation()
+                .field("result", result);
+        if (reason != null && !reason.isBlank()) {
+            request.field("reason", reason);
         }
+        MineBackup.knotLink().query(request).whenComplete((response, error) -> {
+            if (error != null) {
+                MineBackup.LOGGER.warn("Failed to report rejoin result", error);
+            } else if (!response.isOk()) {
+                MineBackup.LOGGER.warn("Backend rejected rejoin result: {}", response.displayMessage());
+            }
+        });
+    }
 
+    private static void resetRejoinState() {
+        state = State.IDLE;
+        rejoinInfo = null;
+        delayTicks = 0;
+        elapsedTicks = 0;
+        attempts = 0;
+    }
+
+    private static void scheduleLanReopen(RestoreSession.RejoinInfo info) {
+        Config.HostReopen config = Config.get().hostReopen();
+        if (!config.enabled() || !info.reopenLan()) {
+            resetLanReopenState();
+            return;
+        }
+        pendingLanReopen = true;
+        lanReopenPort = info.lanPort();
+        lanReopenWaitTicks = LAN_REOPEN_INITIAL_DELAY_TICKS;
+        lanReopenAttempts = 0;
+        randomFallbackTried = false;
+    }
+
+    private static void tickLanReopen(Minecraft client) {
+        if (!pendingLanReopen || client.level == null) {
+            return;
+        }
         IntegratedServer server = client.getSingleplayerServer();
         if (server == null) {
             return;
@@ -154,7 +223,6 @@ public final class ClientRejoinController {
             resetLanReopenState();
             return;
         }
-
         if (lanReopenWaitTicks > 0) {
             lanReopenWaitTicks--;
             return;
@@ -170,169 +238,64 @@ public final class ClientRejoinController {
             return;
         }
 
-        if (tryPublishLan(server, targetPort)) {
+        if (publishLan(server, targetPort)) {
             resetLanReopenState();
-            showClientTip(client, Component.translatable("minebackup.message.lan.reopen.success", targetPort));
+            sendClientMessage(client, Component.translatable(
+                    "minebackup.message.lan.reopen.success",
+                    targetPort));
             return;
         }
 
-        lanReopenAttemptCount++;
-        if (lanReopenAttemptCount < Config.getLanReopenRetryCount()) {
-            lanReopenWaitTicks = Config.getLanReopenRetryIntervalTicks();
+        Config.HostReopen config = Config.get().hostReopen();
+        lanReopenAttempts++;
+        if (lanReopenAttempts < config.retryCount()) {
+            lanReopenWaitTicks = config.retryIntervalTicks();
             return;
         }
-
-        if (!lanReopenTriedRandomFallback && Config.isLanReopenAllowRandomPortFallback()) {
+        if (!randomFallbackTried && config.allowRandomPortFallback()) {
             int fallbackPort = HttpUtil.getAvailablePort();
             if (fallbackPort > 0 && fallbackPort != lanReopenPort) {
                 lanReopenPort = fallbackPort;
-                lanReopenAttemptCount = 0;
-                lanReopenTriedRandomFallback = true;
-                lanReopenWaitTicks = Config.getLanReopenRetryIntervalTicks();
-                showClientTip(client, Component.translatable("minebackup.message.lan.reopen.fallback", fallbackPort));
+                lanReopenAttempts = 0;
+                randomFallbackTried = true;
+                lanReopenWaitTicks = config.retryIntervalTicks();
+                sendClientMessage(client, Component.translatable(
+                        "minebackup.message.lan.reopen.fallback",
+                        fallbackPort));
                 return;
             }
         }
-
         finishLanReopenFailure(client);
     }
 
-    private static void scheduleLanReopenAfterRestore(Minecraft client) {
-        if (!Config.isAutoReopenLanAfterRestore() || !HotRestoreState.reopenLanAfterRestore) {
-            resetLanReopenState();
-            return;
-        }
-
-        int preferredPort = HotRestoreState.lastLanPort;
-        if (preferredPort <= 0) {
-            IntegratedServer server = client == null ? null : client.getSingleplayerServer();
-            preferredPort = server == null ? -1 : server.getPort();
-        }
-
-        pendingLanReopen = true;
-        lanReopenPort = preferredPort;
-        lanReopenWaitTicks = LAN_REOPEN_INITIAL_DELAY_TICKS;
-        lanReopenAttemptCount = 0;
-        lanReopenTriedRandomFallback = false;
-    }
-
-    private static boolean tryPublishLan(IntegratedServer server, int port) {
+    private static boolean publishLan(IntegratedServer server, int port) {
         try {
             GameType gameType = server.getDefaultGameType();
-            boolean allowCommands = server.getPlayerList() != null && server.getPlayerList().isAllowCommandsForAllPlayers();
+            boolean allowCommands = server.getPlayerList().isAllowCommandsForAllPlayers();
             return server.publishServer(gameType, allowCommands, port);
-        } catch (Exception e) {
-            MineBackup.LOGGER.warn("Failed to reopen LAN after restore: {}", e.getMessage());
+        } catch (RuntimeException exception) {
+            MineBackup.LOGGER.warn("Failed to reopen LAN after restore", exception);
             return false;
         }
     }
 
     private static void finishLanReopenFailure(Minecraft client) {
         resetLanReopenState();
-        showClientTip(client, Component.translatable("minebackup.message.lan.reopen.failed"));
+        sendClientMessage(client, Component.translatable("minebackup.message.lan.reopen.failed"));
+    }
+
+    private static void sendClientMessage(Minecraft client, Component message) {
+        if (client.player != null) {
+            client.player.sendSystemMessage(message);
+        }
     }
 
     private static void resetLanReopenState() {
         pendingLanReopen = false;
         lanReopenWaitTicks = 0;
-        lanReopenAttemptCount = 0;
+        lanReopenAttempts = 0;
         lanReopenPort = -1;
-        lanReopenTriedRandomFallback = false;
-    }
-
-    private static void showClientTip(Minecraft client, Component message) {
-        if (client == null || message == null) {
-            return;
-        }
-        client.execute(() -> {
-            if (client.player != null) {
-                client.player.sendSystemMessage(message);
-            }
-        });
-    }
-
-    private static void attemptAutoRejoin(Minecraft client, String levelId) {
-        try {
-            String normalized = sanitizeLevelId(levelId);
-            if (normalized == null) {
-                throw new IllegalArgumentException("Invalid level id for auto rejoin");
-            }
-
-            Component notice = Component.translatable("minebackup.message.restore.rejoining");
-            Screen messageScreen = new GenericMessageScreen(notice);
-            client.setScreen(messageScreen);
-
-            if (client.level != null) {
-                disconnectInitiated = true;
-                disconnectWaitTicks = 0;
-                try {
-                    client.level.disconnect(notice);
-                } catch (Throwable t) {
-                    MineBackup.LOGGER.warn("Failed to disconnect current level before restore: {}", t.getMessage());
-                }
-                try {
-                    client.disconnect(messageScreen, false);
-                } catch (Throwable t) {
-                    MineBackup.LOGGER.warn("Failed to open disconnect flow before restore: {}", t.getMessage());
-                    client.setScreen(messageScreen);
-                }
-                return;
-            }
-
-            startIntegratedServer(client, normalized);
-        } catch (Exception e) {
-            MineBackup.LOGGER.error("Auto rejoin failed for world '{}': {}", levelId, e.getMessage(), e);
-            handleRejoinFailure(client, levelId, e);
-        }
-    }
-
-    private static void startIntegratedServer(Minecraft client, String levelId) {
-        try {
-            String normalized = sanitizeLevelId(levelId);
-            if (normalized == null) {
-                throw new IllegalArgumentException("Invalid level id for integrated server start");
-            }
-
-            if (client.getSingleplayerServer() != null) {
-                worldToRejoin = normalized;
-                readyToRejoin = true;
-                return;
-            }
-
-            waitingForRejoinCompletion = true;
-            rejoinCompletionTimeoutTicks = 0;
-            client.createWorldOpenFlows().openWorld(normalized, () -> {
-                waitingForRejoinCompletion = false;
-                OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure cancelled");
-                resetRestoreState();
-                client.setScreen(new TitleScreen());
-            });
-        } catch (Exception e) {
-            waitingForRejoinCompletion = false;
-            handleRejoinFailure(client, levelId, e);
-        }
-    }
-
-    private static void handleRejoinFailure(Minecraft client, String levelId, Exception error) {
-        retryCount++;
-        MineBackup.LOGGER.warn("Automatic rejoin attempt {}/{} failed for {}: {}",
-                retryCount, MAX_RETRY_COUNT, levelId, error.getMessage());
-
-        String normalized = sanitizeLevelId(levelId);
-        if (retryCount < MAX_RETRY_COUNT && normalized != null) {
-            worldToRejoin = normalized;
-            readyToRejoin = true;
-            return;
-        }
-
-        OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, "REJOIN_RESULT failure max_retries_exceeded");
-        resetRestoreState();
-        try {
-            client.setScreen(new SelectWorldScreen(new TitleScreen()));
-        } catch (Exception ex) {
-            MineBackup.LOGGER.warn("Failed to open world selection screen: {}", ex.getMessage());
-            client.setScreen(new TitleScreen());
-        }
+        randomFallbackTried = false;
     }
 
     private static String sanitizeLevelId(String rawLevelId) {
@@ -340,12 +303,19 @@ public final class ClientRejoinController {
             return null;
         }
         String normalized = rawLevelId.trim();
-        if (normalized.isEmpty() || ".".equals(normalized) || "..".equals(normalized)) {
-            return null;
-        }
-        if (normalized.contains("/") || normalized.contains("\\")) {
+        if (normalized.isEmpty()
+                || ".".equals(normalized)
+                || "..".equals(normalized)
+                || normalized.contains("/")
+                || normalized.contains("\\")) {
             return null;
         }
         return normalized;
+    }
+
+    private enum State {
+        IDLE,
+        DELAYING,
+        OPENING
     }
 }

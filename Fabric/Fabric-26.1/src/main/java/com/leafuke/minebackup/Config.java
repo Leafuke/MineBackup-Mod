@@ -6,203 +6,231 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Objects;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicReference;
 
-public class Config {
+public final class Config {
     private static final String CONFIG_FILE = "minebackup-auto.properties";
 
-    private static final boolean AUTO_REOPEN_LAN_AFTER_RESTORE_DEFAULT = true;
-    private static final int LAN_REOPEN_RETRY_COUNT_DEFAULT = 6;
-    private static final int LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT = 40;
-    private static final boolean LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT = true;
+    private static final boolean HOST_REOPEN_ENABLED_DEFAULT = true;
+    private static final int HOST_REOPEN_RETRY_COUNT_DEFAULT = 6;
+    private static final int HOST_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT = 40;
+    private static final boolean HOST_REOPEN_RANDOM_FALLBACK_DEFAULT = true;
+    private static final boolean CLIENT_RECONNECT_ENABLED_DEFAULT = true;
+    private static final int CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT = 200;
+    private static final int CLIENT_RECONNECT_RETRY_INTERVAL_TICKS_DEFAULT = 100;
+    private static final int CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT = 1800;
+    private static final boolean UPDATE_CHECK_ENABLED_DEFAULT = true;
+    public static final int MAX_AUTO_BACKUP_INTERVAL_MINUTES = 525_600;
 
-    private static final boolean AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT = true;
-    private static final int LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT = 200;
-    private static final int LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT = 100;
-    private static final int LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT = 1800;
-    private static final boolean ENABLE_UPDATE_CHECK_DEFAULT = true;
-
-    private static String configId;
-    private static int worldIndex = -1;
-    private static int internalTime = -1;
-    private static boolean autoReopenLanAfterRestore = AUTO_REOPEN_LAN_AFTER_RESTORE_DEFAULT;
-    private static int lanReopenRetryCount = LAN_REOPEN_RETRY_COUNT_DEFAULT;
-    private static int lanReopenRetryIntervalTicks = LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT;
-    private static boolean lanReopenAllowRandomPortFallback = LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT;
-    private static boolean autoReconnectLanClientAfterRestore = AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT;
-    private static int lanClientReconnectInitialDelayTicks = LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT;
-    private static int lanClientReconnectIntervalTicks = LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT;
-    private static int lanClientReconnectMaxDurationTicks = LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT;
-    private static boolean enableUpdateCheck = ENABLE_UPDATE_CHECK_DEFAULT;
+    private static final AtomicReference<Snapshot> CURRENT = new AtomicReference<>(defaults());
 
     private Config() {
     }
 
-    public static void load() {
-        Path configPath = FabricLoader.getInstance().getConfigDir().resolve(CONFIG_FILE);
+    public static synchronized Snapshot load() {
+        Path configPath = configPath();
         if (!Files.exists(configPath)) {
-            clearInMemory();
-            save();
+            Snapshot defaults = defaults();
+            CURRENT.set(defaults);
+            write(defaults);
+            return defaults;
+        }
+
+        Properties source = new Properties();
+        try (Reader reader = Files.newBufferedReader(configPath, StandardCharsets.UTF_8)) {
+            source.load(reader);
+            Snapshot snapshot = fromProperties(source);
+            CURRENT.set(snapshot);
+            if (!sameKnownValues(source, toProperties(snapshot))) {
+                write(snapshot);
+            }
+            return snapshot;
+        } catch (IOException exception) {
+            MineBackup.LOGGER.error("Failed to load MineBackup config; using defaults for this session", exception);
+            Snapshot defaults = defaults();
+            CURRENT.set(defaults);
+            return defaults;
+        }
+    }
+
+    public static Snapshot get() {
+        return CURRENT.get();
+    }
+
+    public static synchronized void setAutoBackup(String configId, String folder, int intervalMinutes) {
+        String normalizedConfigId = normalize(configId);
+        String normalizedFolder = normalize(folder);
+        if (normalizedConfigId == null
+                || normalizedFolder == null
+                || intervalMinutes < 1
+                || intervalMinutes > MAX_AUTO_BACKUP_INTERVAL_MINUTES) {
+            throw new IllegalArgumentException("Invalid automatic backup settings");
+        }
+
+        Snapshot updated = CURRENT.get().withAutoBackup(
+                new AutoBackup(normalizedConfigId, normalizedFolder, intervalMinutes));
+        CURRENT.set(updated);
+        write(updated);
+    }
+
+    public static synchronized void clearAutoBackup() {
+        Snapshot updated = CURRENT.get().withAutoBackup(null);
+        CURRENT.set(updated);
+        write(updated);
+    }
+
+    public static synchronized void clearAutoBackupIfMatches(String configId, String folder) {
+        AutoBackup current = CURRENT.get().autoBackup();
+        String normalizedConfigId = normalize(configId);
+        String normalizedFolder = normalize(folder);
+        if (current == null
+                || !current.configId().equals(normalizedConfigId)
+                || !current.folder().equals(normalizedFolder)) {
             return;
         }
+        clearAutoBackup();
+    }
 
-        Properties props = new Properties();
-        boolean shouldSave = false;
-        try (Reader reader = Files.newBufferedReader(configPath, StandardCharsets.UTF_8)) {
-            props.load(reader);
-            configId = normalizeConfigId(props.getProperty("configId"));
-            worldIndex = parseInt(props.getProperty("worldIndex"), -1);
-            internalTime = parseInt(props.getProperty("internalTime"), -1);
-            autoReopenLanAfterRestore = parseBoolean(props.getProperty("autoReopenLanAfterRestore"),
-                AUTO_REOPEN_LAN_AFTER_RESTORE_DEFAULT);
-            lanReopenRetryCount = clamp(parseInt(props.getProperty("lanReopenRetryCount"),
-                LAN_REOPEN_RETRY_COUNT_DEFAULT), 1, 30);
-            lanReopenRetryIntervalTicks = clamp(parseInt(props.getProperty("lanReopenRetryIntervalTicks"),
-                LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT), 10, 200);
-            lanReopenAllowRandomPortFallback = parseBoolean(props.getProperty("lanReopenAllowRandomPortFallback"),
-                LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT);
-            autoReconnectLanClientAfterRestore = parseBoolean(props.getProperty("autoReconnectLanClientAfterRestore"),
-                AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT);
-            lanClientReconnectInitialDelayTicks = clamp(parseInt(props.getProperty("lanClientReconnectInitialDelayTicks"),
-                LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT), 40, 600);
-            lanClientReconnectIntervalTicks = clamp(parseInt(props.getProperty("lanClientReconnectIntervalTicks"),
-                LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT), 20, 200);
-            lanClientReconnectMaxDurationTicks = clamp(parseInt(props.getProperty("lanClientReconnectMaxDurationTicks"),
-                LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT), 200, 7200);
-            enableUpdateCheck = parseBoolean(props.getProperty("enableUpdateCheck"),
-                ENABLE_UPDATE_CHECK_DEFAULT);
-            shouldSave = hasMissingRequiredKeys(props);
-        } catch (IOException e) {
-            MineBackup.LOGGER.error("Failed to load config", e);
-            clearInMemory();
+    private static Snapshot fromProperties(Properties properties) {
+        String configId = first(properties, "auto.configId", "configId");
+        String folder = first(properties, "auto.folder", "worldIndex");
+        int intervalMinutes = parseInt(
+                first(properties, "auto.intervalMinutes", "internalTime"),
+                -1,
+                -1,
+                MAX_AUTO_BACKUP_INTERVAL_MINUTES);
+        AutoBackup autoBackup = normalize(configId) != null
+                && normalize(folder) != null
+                && intervalMinutes >= 1
+                ? new AutoBackup(normalize(configId), normalize(folder), intervalMinutes)
+                : null;
+
+        HostReopen hostReopen = new HostReopen(
+                parseBoolean(first(properties, "lan.hostReopen.enabled", "autoReopenLanAfterRestore"),
+                        HOST_REOPEN_ENABLED_DEFAULT),
+                parseInt(first(properties, "lan.hostReopen.retryCount", "lanReopenRetryCount"),
+                        HOST_REOPEN_RETRY_COUNT_DEFAULT, 1, 30),
+                parseInt(first(properties, "lan.hostReopen.retryIntervalTicks", "lanReopenRetryIntervalTicks"),
+                        HOST_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT, 10, 200),
+                parseBoolean(first(properties, "lan.hostReopen.allowRandomPortFallback",
+                                "lanReopenAllowRandomPortFallback"),
+                        HOST_REOPEN_RANDOM_FALLBACK_DEFAULT));
+
+        ClientReconnect clientReconnect = new ClientReconnect(
+                parseBoolean(first(properties, "lan.clientReconnect.enabled",
+                                "autoReconnectLanClientAfterRestore"),
+                        CLIENT_RECONNECT_ENABLED_DEFAULT),
+                parseInt(first(properties, "lan.clientReconnect.initialDelayTicks",
+                                "lanClientReconnectInitialDelayTicks"),
+                        CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT, 40, 600),
+                parseInt(first(properties, "lan.clientReconnect.retryIntervalTicks",
+                                "lanClientReconnectIntervalTicks"),
+                        CLIENT_RECONNECT_RETRY_INTERVAL_TICKS_DEFAULT, 20, 200),
+                parseInt(first(properties, "lan.clientReconnect.maxDurationTicks",
+                                "lanClientReconnectMaxDurationTicks"),
+                        CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT, 200, 7200));
+
+        boolean updateCheckEnabled = parseBoolean(
+                first(properties, "updateCheck.enabled", "enableUpdateCheck"),
+                UPDATE_CHECK_ENABLED_DEFAULT);
+        return new Snapshot(autoBackup, hostReopen, clientReconnect, updateCheckEnabled);
+    }
+
+    private static Properties toProperties(Snapshot snapshot) {
+        Properties properties = new Properties();
+        AutoBackup autoBackup = snapshot.autoBackup();
+        if (autoBackup != null) {
+            properties.setProperty("auto.configId", autoBackup.configId());
+            properties.setProperty("auto.folder", autoBackup.folder());
+            properties.setProperty("auto.intervalMinutes", String.valueOf(autoBackup.intervalMinutes()));
         }
 
-        if (shouldSave) {
-            save();
+        HostReopen host = snapshot.hostReopen();
+        properties.setProperty("lan.hostReopen.enabled", String.valueOf(host.enabled()));
+        properties.setProperty("lan.hostReopen.retryCount", String.valueOf(host.retryCount()));
+        properties.setProperty("lan.hostReopen.retryIntervalTicks", String.valueOf(host.retryIntervalTicks()));
+        properties.setProperty("lan.hostReopen.allowRandomPortFallback",
+                String.valueOf(host.allowRandomPortFallback()));
+
+        ClientReconnect client = snapshot.clientReconnect();
+        properties.setProperty("lan.clientReconnect.enabled", String.valueOf(client.enabled()));
+        properties.setProperty("lan.clientReconnect.initialDelayTicks", String.valueOf(client.initialDelayTicks()));
+        properties.setProperty("lan.clientReconnect.retryIntervalTicks", String.valueOf(client.retryIntervalTicks()));
+        properties.setProperty("lan.clientReconnect.maxDurationTicks", String.valueOf(client.maxDurationTicks()));
+        properties.setProperty("updateCheck.enabled", String.valueOf(snapshot.updateCheckEnabled()));
+        return properties;
+    }
+
+    private static boolean sameKnownValues(Properties source, Properties canonical) {
+        if (source.size() != canonical.size()) {
+            return false;
+        }
+        for (String key : canonical.stringPropertyNames()) {
+            if (!Objects.equals(source.getProperty(key), canonical.getProperty(key))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void write(Snapshot snapshot) {
+        Path target = configPath();
+        Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
+        try {
+            Files.createDirectories(target.getParent());
+            try (Writer writer = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8)) {
+                toProperties(snapshot).store(writer, "MineBackup 3 configuration");
+            }
+            try {
+                Files.move(temporary, target,
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException exception) {
+            MineBackup.LOGGER.error("Failed to save MineBackup config", exception);
+        } finally {
+            try {
+                Files.deleteIfExists(temporary);
+            } catch (IOException exception) {
+                MineBackup.LOGGER.debug("Failed to remove temporary MineBackup config", exception);
+            }
         }
     }
 
-    public static void save() {
-        Path configPath = FabricLoader.getInstance().getConfigDir().resolve(CONFIG_FILE);
-        Properties props = new Properties();
-        if (configId != null) {
-            props.setProperty("configId", configId);
-        }
-        props.setProperty("worldIndex", String.valueOf(worldIndex));
-        props.setProperty("internalTime", String.valueOf(internalTime));
-        props.setProperty("autoReopenLanAfterRestore", String.valueOf(autoReopenLanAfterRestore));
-        props.setProperty("lanReopenRetryCount", String.valueOf(lanReopenRetryCount));
-        props.setProperty("lanReopenRetryIntervalTicks", String.valueOf(lanReopenRetryIntervalTicks));
-        props.setProperty("lanReopenAllowRandomPortFallback", String.valueOf(lanReopenAllowRandomPortFallback));
-        props.setProperty("autoReconnectLanClientAfterRestore", String.valueOf(autoReconnectLanClientAfterRestore));
-        props.setProperty("lanClientReconnectInitialDelayTicks", String.valueOf(lanClientReconnectInitialDelayTicks));
-        props.setProperty("lanClientReconnectIntervalTicks", String.valueOf(lanClientReconnectIntervalTicks));
-        props.setProperty("lanClientReconnectMaxDurationTicks", String.valueOf(lanClientReconnectMaxDurationTicks));
-        props.setProperty("enableUpdateCheck", String.valueOf(enableUpdateCheck));
-
-        try (Writer writer = Files.newBufferedWriter(configPath, StandardCharsets.UTF_8)) {
-            props.store(writer, "MineBackup Auto Config");
-        } catch (IOException e) {
-            MineBackup.LOGGER.error("Failed to save config", e);
-        }
+    private static Path configPath() {
+        return FabricLoader.getInstance().getConfigDir().resolve(CONFIG_FILE);
     }
 
-    public static void setAutoBackup(String cid, int wid, int time) {
-        configId = normalizeConfigId(cid);
-        worldIndex = wid;
-        internalTime = time;
-        save();
+    private static Snapshot defaults() {
+        return new Snapshot(
+                null,
+                new HostReopen(
+                        HOST_REOPEN_ENABLED_DEFAULT,
+                        HOST_REOPEN_RETRY_COUNT_DEFAULT,
+                        HOST_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT,
+                        HOST_REOPEN_RANDOM_FALLBACK_DEFAULT),
+                new ClientReconnect(
+                        CLIENT_RECONNECT_ENABLED_DEFAULT,
+                        CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT,
+                        CLIENT_RECONNECT_RETRY_INTERVAL_TICKS_DEFAULT,
+                        CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT),
+                UPDATE_CHECK_ENABLED_DEFAULT);
     }
 
-    public static void clearAutoBackup() {
-        clearInMemory();
-        save();
+    private static String first(Properties properties, String canonicalKey, String legacyKey) {
+        String canonical = properties.getProperty(canonicalKey);
+        return canonical != null ? canonical : properties.getProperty(legacyKey);
     }
 
-    public static boolean hasAutoBackup() {
-        return configId != null && worldIndex >= 0 && internalTime >= 0;
-    }
-
-    public static String getConfigId() {
-        return configId;
-    }
-
-    public static int getWorldIndex() {
-        return worldIndex;
-    }
-
-    public static int getInternalTime() {
-        return internalTime;
-    }
-
-    public static boolean isAutoReopenLanAfterRestore() {
-        return autoReopenLanAfterRestore;
-    }
-
-    public static int getLanReopenRetryCount() {
-        return lanReopenRetryCount;
-    }
-
-    public static int getLanReopenRetryIntervalTicks() {
-        return lanReopenRetryIntervalTicks;
-    }
-
-    public static boolean isLanReopenAllowRandomPortFallback() {
-        return lanReopenAllowRandomPortFallback;
-    }
-
-    public static boolean isAutoReconnectLanClientAfterRestore() {
-        return autoReconnectLanClientAfterRestore;
-    }
-
-    public static int getLanClientReconnectInitialDelayTicks() {
-        return lanClientReconnectInitialDelayTicks;
-    }
-
-    public static int getLanClientReconnectIntervalTicks() {
-        return lanClientReconnectIntervalTicks;
-    }
-
-    public static int getLanClientReconnectMaxDurationTicks() {
-        return lanClientReconnectMaxDurationTicks;
-    }
-
-    public static boolean isUpdateCheckEnabled() {
-        return enableUpdateCheck;
-    }
-
-    private static void clearInMemory() {
-        configId = null;
-        worldIndex = -1;
-        internalTime = -1;
-        autoReopenLanAfterRestore = AUTO_REOPEN_LAN_AFTER_RESTORE_DEFAULT;
-        lanReopenRetryCount = LAN_REOPEN_RETRY_COUNT_DEFAULT;
-        lanReopenRetryIntervalTicks = LAN_REOPEN_RETRY_INTERVAL_TICKS_DEFAULT;
-        lanReopenAllowRandomPortFallback = LAN_REOPEN_ALLOW_RANDOM_PORT_FALLBACK_DEFAULT;
-        autoReconnectLanClientAfterRestore = AUTO_RECONNECT_LAN_CLIENT_AFTER_RESTORE_DEFAULT;
-        lanClientReconnectInitialDelayTicks = LAN_CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT;
-        lanClientReconnectIntervalTicks = LAN_CLIENT_RECONNECT_INTERVAL_TICKS_DEFAULT;
-        lanClientReconnectMaxDurationTicks = LAN_CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT;
-        enableUpdateCheck = ENABLE_UPDATE_CHECK_DEFAULT;
-    }
-
-    private static boolean hasMissingRequiredKeys(Properties props) {
-        return !props.containsKey("worldIndex")
-                || !props.containsKey("internalTime")
-                || !props.containsKey("autoReopenLanAfterRestore")
-                || !props.containsKey("lanReopenRetryCount")
-                || !props.containsKey("lanReopenRetryIntervalTicks")
-                || !props.containsKey("lanReopenAllowRandomPortFallback")
-                || !props.containsKey("autoReconnectLanClientAfterRestore")
-                || !props.containsKey("lanClientReconnectInitialDelayTicks")
-                || !props.containsKey("lanClientReconnectIntervalTicks")
-                || !props.containsKey("lanClientReconnectMaxDurationTicks")
-                || !props.containsKey("enableUpdateCheck");
-    }
-
-    private static String normalizeConfigId(String value) {
+    private static String normalize(String value) {
         if (value == null) {
             return null;
         }
@@ -210,13 +238,13 @@ public class Config {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private static int parseInt(String value, int fallback) {
+    private static int parseInt(String value, int fallback, int minimum, int maximum) {
         if (value == null || value.isBlank()) {
             return fallback;
         }
         try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException ex) {
+            return Math.clamp(Integer.parseInt(value.trim()), minimum, maximum);
+        } catch (NumberFormatException exception) {
             return fallback;
         }
     }
@@ -225,10 +253,49 @@ public class Config {
         if (value == null || value.isBlank()) {
             return fallback;
         }
-        return Boolean.parseBoolean(value.trim());
+        return switch (value.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "true" -> true;
+            case "false" -> false;
+            default -> fallback;
+        };
     }
 
-    private static int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
+    public record Snapshot(
+            AutoBackup autoBackup,
+            HostReopen hostReopen,
+            ClientReconnect clientReconnect,
+            boolean updateCheckEnabled) {
+        public Snapshot {
+            Objects.requireNonNull(hostReopen, "hostReopen");
+            Objects.requireNonNull(clientReconnect, "clientReconnect");
+        }
+
+        public Snapshot withAutoBackup(AutoBackup value) {
+            return new Snapshot(value, hostReopen, clientReconnect, updateCheckEnabled);
+        }
+    }
+
+    public record AutoBackup(String configId, String folder, int intervalMinutes) {
+        public AutoBackup {
+            Objects.requireNonNull(configId, "configId");
+            Objects.requireNonNull(folder, "folder");
+            if (intervalMinutes < 1 || intervalMinutes > MAX_AUTO_BACKUP_INTERVAL_MINUTES) {
+                throw new IllegalArgumentException("Automatic backup interval is outside the supported range");
+            }
+        }
+    }
+
+    public record HostReopen(
+            boolean enabled,
+            int retryCount,
+            int retryIntervalTicks,
+            boolean allowRandomPortFallback) {
+    }
+
+    public record ClientReconnect(
+            boolean enabled,
+            int initialDelayTicks,
+            int retryIntervalTicks,
+            int maxDurationTicks) {
     }
 }

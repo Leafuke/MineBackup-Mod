@@ -1,7 +1,9 @@
 package com.leafuke.minebackup;
 
-import com.leafuke.minebackup.knotlink.OpenSocketQuerier;
+import com.leafuke.minebackup.knotlink.KnotLinkRequest;
+import com.leafuke.minebackup.knotlink.KnotLinkResponse;
 import com.mojang.brigadier.LiteralMessage;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 
@@ -11,266 +13,170 @@ import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
 public final class CommandSuggestions {
-    private static final String QUERIER_APP_ID = "0x00000020";
-    private static final String QUERIER_SOCKET_ID = "0x00000010";
-    private static final long CONFIG_QUERY_INTERVAL_MS = 5000L;
-    private static final long CURRENT_BACKUPS_QUERY_INTERVAL_MS = 5000L;
-
-    private static volatile long lastConfigsQueryAtMs = 0L;
-    private static volatile List<ConfigDescriptor> lastConfigs = List.of();
-    private static CompletableFuture<List<ConfigDescriptor>> configQueryFuture;
-
-    private static volatile long lastCurrentBackupsQueryAtMs = 0L;
-    private static volatile String lastCurrentBackupsResponse;
-    private static CompletableFuture<String> currentBackupsQueryFuture;
+    private static final long CACHE_NANOS = java.time.Duration.ofSeconds(5).toNanos();
+    private static final Object CONFIG_CACHE_LOCK = new Object();
+    private static long configCacheAt;
+    private static List<ConfigDescriptor> configCache = List.of();
+    private static CompletableFuture<List<ConfigDescriptor>> configQuery;
 
     private CommandSuggestions() {
     }
 
     public static CompletableFuture<Suggestions> suggestConfigIds(SuggestionsBuilder builder) {
-        return queryConfigsThrottled()
-                .thenApply(configs -> {
-                    String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
-                    for (ConfigDescriptor config : configs) {
-                        if (matchesConfig(config, remaining)) {
-                            builder.suggest(config.id(), new LiteralMessage(config.name()));
-                        }
-                    }
-                    return builder.build();
-                })
-                .exceptionally(ex -> {
-                    MineBackup.LOGGER.warn("Failed to suggest config ids: {}", ex.getMessage());
-                    return builder.build();
-                });
-    }
-
-    public static CompletableFuture<Suggestions> suggestWorldIndices(String configId, SuggestionsBuilder builder) {
-        return queryWorlds(configId)
-                .thenApply(worlds -> {
-                    String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
-                    for (WorldDescriptor world : worlds) {
-                        String indexText = String.valueOf(world.index());
-                        String nameLower = world.name().toLowerCase(Locale.ROOT);
-                        if (remaining.isEmpty()
-                                || indexText.startsWith(remaining)
-                                || nameLower.startsWith(remaining)
-                                || nameLower.contains(remaining)) {
-                            builder.suggest(indexText, new LiteralMessage(world.name()));
-                        }
-                    }
-                    return builder.build();
-                })
-                .exceptionally(ex -> {
-                    MineBackup.LOGGER.warn("Failed to suggest world indices: {}", ex.getMessage());
-                    return builder.build();
-                });
-    }
-
-    public static CompletableFuture<Suggestions> suggestBackupFiles(String configId, int worldIndex, SuggestionsBuilder builder) {
-        String command = String.format("LIST_BACKUPS %s %d", configId, worldIndex);
-        return queryBackend(command)
-                .thenApply(response -> {
-                    String remaining = normalizeQuotedInput(builder.getRemaining()).toLowerCase(Locale.ROOT);
-                    if (response != null && response.startsWith("OK:")) {
-                        for (String file : splitOkList(response)) {
-                            String suggestion = quoteSuggestion(file);
-                            if (suggestion != null && file.toLowerCase(Locale.ROOT).startsWith(remaining)) {
-                                builder.suggest(suggestion);
-                            }
-                        }
-                    }
-                    return builder.build();
-                })
-                .exceptionally(ex -> {
-                    MineBackup.LOGGER.warn("Failed to suggest backup files: {}", ex.getMessage());
-                    return builder.build();
-                });
-    }
-
-    public static CompletableFuture<Suggestions> suggestCurrentBackupFiles(SuggestionsBuilder builder) {
-        return queryCurrentBackupsThrottled()
-                .thenApply(response -> {
-                    String remaining = normalizeQuotedInput(builder.getRemaining()).toLowerCase(Locale.ROOT);
-                    if (response != null && response.startsWith("OK:")) {
-                        for (String file : splitOkList(response)) {
-                            String suggestion = quoteSuggestion(file);
-                            if (suggestion != null && file.toLowerCase(Locale.ROOT).startsWith(remaining)) {
-                                builder.suggest(suggestion);
-                            }
-                        }
-                    }
-                    return builder.build();
-                })
-                .exceptionally(ex -> {
-                    MineBackup.LOGGER.warn("Failed to suggest current backup files: {}", ex.getMessage());
-                    return builder.build();
-                });
-    }
-
-    private static CompletableFuture<List<ConfigDescriptor>> queryConfigsThrottled() {
-        synchronized (CommandSuggestions.class) {
-            long now = System.currentTimeMillis();
-            if (now - lastConfigsQueryAtMs < CONFIG_QUERY_INTERVAL_MS) {
-                if (configQueryFuture != null && !configQueryFuture.isDone()) {
-                    return configQueryFuture;
-                }
-                return CompletableFuture.completedFuture(lastConfigs);
+        return queryConfigs().handle((configs, error) -> {
+            if (error != null) {
+                MineBackup.LOGGER.debug("Unable to query config suggestions", error);
+                return builder.build();
             }
-
-            lastConfigsQueryAtMs = now;
-            CompletableFuture<String> future = queryBackend("LIST_CONFIGS");
-            configQueryFuture = future.handle((response, ex) -> {
-                synchronized (CommandSuggestions.class) {
-                    configQueryFuture = null;
-                    if (ex == null && response != null && response.startsWith("OK:")) {
-                        lastConfigs = parseConfigs(response);
-                    }
-                }
-                if (ex != null) {
-                    MineBackup.LOGGER.warn("Failed to query configs: {}", ex.getMessage());
-                }
-                return lastConfigs;
-            });
-            return configQueryFuture;
-        }
-    }
-
-    private static CompletableFuture<List<WorldDescriptor>> queryWorlds(String configId) {
-        String normalized = normalizeConfigId(configId);
-        if (normalized == null) {
-            return CompletableFuture.completedFuture(List.of());
-        }
-
-        return queryBackend(String.format("LIST_WORLDS %s", normalized))
-                .thenApply(CommandSuggestions::parseWorlds);
-    }
-
-    private static CompletableFuture<String> queryCurrentBackupsThrottled() {
-        synchronized (CommandSuggestions.class) {
-            long now = System.currentTimeMillis();
-            if (now - lastCurrentBackupsQueryAtMs < CURRENT_BACKUPS_QUERY_INTERVAL_MS) {
-                if (currentBackupsQueryFuture != null && !currentBackupsQueryFuture.isDone()) {
-                    return currentBackupsQueryFuture;
-                }
-                return CompletableFuture.completedFuture(lastCurrentBackupsResponse);
-            }
-
-            lastCurrentBackupsQueryAtMs = now;
-            CompletableFuture<String> future = queryBackend("LIST_BACKUPS_CURRENT");
-            currentBackupsQueryFuture = future.handle((response, ex) -> {
-                synchronized (CommandSuggestions.class) {
-                    currentBackupsQueryFuture = null;
-                    if (ex == null && response != null && response.startsWith("OK:")) {
-                        lastCurrentBackupsResponse = response;
-                    }
-                }
-                if (ex != null) {
-                    MineBackup.LOGGER.warn("Failed to query current backups: {}", ex.getMessage());
-                    return lastCurrentBackupsResponse;
-                }
-                return response;
-            });
-            return currentBackupsQueryFuture;
-        }
-    }
-
-    private static CompletableFuture<String> queryBackend(String command) {
-        CompletableFuture<String> future = OpenSocketQuerier.query(QUERIER_APP_ID, QUERIER_SOCKET_ID, command);
-        if (future == null) {
-            return CompletableFuture.completedFuture(null);
-        }
-        return future;
-    }
-
-    private static List<ConfigDescriptor> parseConfigs(String response) {
-        List<ConfigDescriptor> configs = new ArrayList<>();
-        for (String item : splitOkList(response)) {
-            String[] parts = item.split(",", 2);
-            if (parts.length == 2) {
-                String id = normalizeConfigId(parts[0]);
-                String name = parts[1].trim();
-                if (id != null && !name.isEmpty()) {
-                    configs.add(new ConfigDescriptor(id, name));
+            String remaining = normalizeRemaining(builder.getRemaining());
+            for (ConfigDescriptor config : configs) {
+                if (matches(config.id(), remaining) || matches(config.name(), remaining)) {
+                    builder.suggest(config.id(), new LiteralMessage(config.name()));
                 }
             }
-        }
-        return configs;
+            return builder.build();
+        });
     }
 
-    private static List<WorldDescriptor> parseWorlds(String response) {
-        List<WorldDescriptor> worlds = new ArrayList<>();
-        if (response == null || !response.startsWith("OK:")) {
-            return worlds;
-        }
-
-        String data = response.substring(3);
-        if (data.isEmpty()) {
-            return worlds;
-        }
-
-        String[] parts = data.split(";");
-        for (int i = 0; i < parts.length; i++) {
-            String name = parts[i].trim();
-            if (!name.isEmpty()) {
-                worlds.add(new WorldDescriptor(i, name));
+    public static CompletableFuture<Suggestions> suggestFolders(String configId, SuggestionsBuilder builder) {
+        KnotLinkRequest request = KnotLinkRequest.command("LIST_FOLDERS")
+                .field("config_id", configId);
+        return queryData(request).handle((data, error) -> {
+            if (error != null) {
+                MineBackup.LOGGER.debug("Unable to query folder suggestions", error);
+                return builder.build();
             }
-        }
-        return worlds;
+            String remaining = normalizeRemaining(builder.getRemaining());
+            List<String> folders = splitList(data);
+            for (int index = 0; index < folders.size(); index++) {
+                String folder = folders.get(index);
+                if (matches(folder, remaining) || String.valueOf(index).startsWith(remaining)) {
+                    builder.suggest(
+                            StringArgumentType.escapeIfRequired(folder),
+                            new LiteralMessage("#" + index));
+                }
+            }
+            return builder.build();
+        });
     }
 
-    private static List<String> splitOkList(String response) {
-        if (response == null || !response.startsWith("OK:")) {
+    public static CompletableFuture<Suggestions> suggestBackups(
+            String configId,
+            String folder,
+            SuggestionsBuilder builder) {
+        KnotLinkRequest request = KnotLinkRequest.command("LIST_BACKUPS")
+                .field("config_id", configId)
+                .field("folder", folder);
+        return queryData(request).handle((data, error) -> {
+            if (error != null) {
+                MineBackup.LOGGER.debug("Unable to query backup suggestions", error);
+                return builder.build();
+            }
+            String remaining = normalizeRemaining(builder.getRemaining());
+            for (String backup : splitList(data)) {
+                if (matches(backup, remaining)) {
+                    builder.suggest(StringArgumentType.escapeIfRequired(backup));
+                }
+            }
+            return builder.build();
+        });
+    }
+
+    public static CompletableFuture<Suggestions> suggestCurrentBackups(SuggestionsBuilder builder) {
+        KnotLinkRequest request = KnotLinkRequest.command("LIST_BACKUPS")
+                .field("current_save", true);
+        return queryData(request).handle((data, error) -> {
+            if (error != null) {
+                MineBackup.LOGGER.debug("Unable to query current backup suggestions", error);
+                return builder.build();
+            }
+            String remaining = normalizeRemaining(builder.getRemaining());
+            for (String backup : splitList(data)) {
+                if (matches(backup, remaining)) {
+                    builder.suggest(StringArgumentType.escapeIfRequired(backup));
+                }
+            }
+            return builder.build();
+        });
+    }
+
+    static List<String> splitList(String data) {
+        if (data == null || data.isBlank()) {
             return List.of();
         }
-
-        String data = response.substring(3);
-        if (data.isEmpty()) {
-            return List.of();
-        }
-
         List<String> values = new ArrayList<>();
-        for (String item : data.split(";")) {
-            if (!item.isEmpty()) {
-                values.add(item);
+        for (String item : data.split(";", -1)) {
+            String trimmed = item.trim();
+            if (!trimmed.isEmpty()) {
+                values.add(trimmed);
             }
         }
-        return values;
+        return List.copyOf(values);
     }
 
-    private static boolean matchesConfig(ConfigDescriptor config, String remaining) {
+    private static CompletableFuture<List<ConfigDescriptor>> queryConfigs() {
+        synchronized (CONFIG_CACHE_LOCK) {
+            long now = System.nanoTime();
+            if (configQuery != null) {
+                return configQuery;
+            }
+            if (now - configCacheAt < CACHE_NANOS) {
+                return CompletableFuture.completedFuture(configCache);
+            }
+
+            configQuery = queryData(KnotLinkRequest.command("LIST_CONFIGS"))
+                    .thenApply(CommandSuggestions::parseConfigs)
+                    .whenComplete((configs, error) -> {
+                        synchronized (CONFIG_CACHE_LOCK) {
+                            if (error == null) {
+                                configCache = configs;
+                                configCacheAt = System.nanoTime();
+                            }
+                            configQuery = null;
+                        }
+                    });
+            return configQuery;
+        }
+    }
+
+    private static CompletableFuture<String> queryData(KnotLinkRequest request) {
+        return MineBackup.knotLink().query(request).thenApply(response -> {
+            if (!response.isOk()) {
+                throw new IllegalStateException(response.displayMessage());
+            }
+            return response.data();
+        });
+    }
+
+    private static List<ConfigDescriptor> parseConfigs(String data) {
+        List<ConfigDescriptor> configs = new ArrayList<>();
+        for (String item : splitList(data)) {
+            String[] parts = item.split(",", 2);
+            if (parts.length == 2 && !parts[0].isBlank() && !parts[1].isBlank()) {
+                configs.add(new ConfigDescriptor(parts[0].trim(), parts[1].trim()));
+            }
+        }
+        return List.copyOf(configs);
+    }
+
+    private static boolean matches(String candidate, String remaining) {
         if (remaining.isEmpty()) {
             return true;
         }
-        String idLower = config.id().toLowerCase(Locale.ROOT);
-        String nameLower = config.name().toLowerCase(Locale.ROOT);
-        return idLower.startsWith(remaining) || nameLower.startsWith(remaining) || nameLower.contains(remaining);
+        return candidate.toLowerCase(Locale.ROOT).contains(remaining);
     }
 
-    private static String normalizeQuotedInput(String remaining) {
-        if (remaining == null || remaining.isEmpty()) {
+    private static String normalizeRemaining(String remaining) {
+        if (remaining == null || remaining.isBlank()) {
             return "";
         }
-        return remaining.charAt(0) == '\'' ? remaining.substring(1) : remaining;
-    }
-
-    private static String quoteSuggestion(String value) {
-        if (value.indexOf('\'') >= 0) {
-            return null;
+        String normalized = remaining.trim();
+        if (normalized.startsWith("\"")) {
+            normalized = normalized.substring(1);
         }
-        return "'" + value + "'";
-    }
-
-    private static String normalizeConfigId(String rawConfigId) {
-        if (rawConfigId == null) {
-            return null;
-        }
-        String trimmed = rawConfigId.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return normalized.toLowerCase(Locale.ROOT);
     }
 
     private record ConfigDescriptor(String id, String name) {
-    }
-
-    private record WorldDescriptor(int index, String name) {
     }
 }
