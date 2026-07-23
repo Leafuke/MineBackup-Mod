@@ -63,7 +63,7 @@ public final class OpenSocketQuerier implements AutoCloseable {
         this.openSocketId = requireId(openSocketId, "openSocketId");
         tcpClient = new TcpClient(
                 Duration.ofMinutes(3),
-                TcpClient.FrameFormat.LENGTH_PREFIXED,
+                TcpClient.FrameFormat.MAGIC_V2,
                 maxMessageBytes);
         tcpClient.setDataReceivedListener(this::onDataReceived);
         tcpClient.setClosedListener(this::onConnectionClosed);

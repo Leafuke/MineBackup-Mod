@@ -29,9 +29,9 @@ import java.util.function.Consumer;
 /**
  * KnotLink SDK 2.0 framed TCP client.
  *
- * <p>KnotLinkService 2.0 currently uses a four-byte big-endian length prefix.
- * The optional magic header remains available for SDK compatibility but is not
- * enabled by MineBackup.</p>
+ * <p>KnotLink 3.0 uses the {@code KK 00 02} magic header followed by a
+ * four-byte big-endian length prefix. The legacy length-only format remains
+ * available for explicit compatibility use.</p>
  */
 public final class TcpClient implements AutoCloseable {
     private static final System.Logger LOGGER =
@@ -73,7 +73,11 @@ public final class TcpClient implements AutoCloseable {
     private volatile Consumer<Throwable> closedListener;
 
     public TcpClient() {
-        this(Duration.ofMinutes(3), FrameFormat.LENGTH_PREFIXED, DEFAULT_MAX_MESSAGE_BYTES);
+        this(Duration.ofMinutes(3), FrameFormat.MAGIC_V2, DEFAULT_MAX_MESSAGE_BYTES);
+    }
+
+    public TcpClient(FrameFormat frameFormat) {
+        this(Duration.ofMinutes(3), frameFormat, DEFAULT_MAX_MESSAGE_BYTES);
     }
 
     public TcpClient(Duration heartbeatInterval, FrameFormat frameFormat) {

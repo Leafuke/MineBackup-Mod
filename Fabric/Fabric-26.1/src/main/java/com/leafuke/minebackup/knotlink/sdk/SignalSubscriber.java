@@ -82,7 +82,7 @@ public final class SignalSubscriber implements AutoCloseable {
             throw new IllegalStateException("Signal subscriber is already started");
         }
 
-        TcpClient client = new TcpClient();
+        TcpClient client = new TcpClient(TcpClient.FrameFormat.MAGIC_V2);
         tcpClient = client;
         client.setDataReceivedListener(data -> signalListener.onSignalReceived(data));
         client.setClosedListener(cause -> {
