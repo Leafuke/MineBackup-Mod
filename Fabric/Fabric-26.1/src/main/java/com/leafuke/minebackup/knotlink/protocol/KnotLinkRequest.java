@@ -22,8 +22,12 @@ public final class KnotLinkRequest {
     }
 
     public KnotLinkRequest conversation() {
+        return conversation(UUID.randomUUID());
+    }
+
+    public KnotLinkRequest conversation(UUID requestId) {
         fields.put("from", CALLER_ID);
-        fields.put("request_id", UUID.randomUUID().toString());
+        fields.put("request_id", java.util.Objects.requireNonNull(requestId, "requestId").toString());
         return this;
     }
 

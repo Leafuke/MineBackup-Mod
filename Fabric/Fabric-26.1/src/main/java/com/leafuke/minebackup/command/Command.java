@@ -1,6 +1,16 @@
 package com.leafuke.minebackup.command;
 
 import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.api.v1.AutoBackupResult;
+import com.leafuke.minebackup.api.v1.BackupRequest;
+import com.leafuke.minebackup.api.v1.BackupResult;
+import com.leafuke.minebackup.api.v1.OperationFailure;
+import com.leafuke.minebackup.api.v1.OperationHandle;
+import com.leafuke.minebackup.api.v1.OperationPhase;
+import com.leafuke.minebackup.api.v1.RestoreControlResult;
+import com.leafuke.minebackup.api.v1.RestoreHandle;
+import com.leafuke.minebackup.api.v1.RestoreRequest;
+import com.leafuke.minebackup.api.v1.RestoreResult;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
@@ -19,7 +29,9 @@ import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.level.storage.LevelResource;
 
 import java.nio.file.Files;
+import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 public final class Command {
@@ -56,6 +68,10 @@ public final class Command {
                                 .executes(context -> executeRestoreCurrent(
                                         context.getSource(),
                                         StringArgumentType.getString(context, "file")))))
+                .then(Commands.literal("confirm")
+                        .executes(context -> executeRestoreConfirm(context.getSource())))
+                .then(Commands.literal("stop")
+                        .executes(context -> executeRestoreStop(context.getSource())))
                 .then(buildTargetCommands())
                 .then(buildListCommands())
                 .then(buildAutoCommands()));
@@ -126,43 +142,26 @@ public final class Command {
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> buildAutoCommands() {
         return Commands.literal("auto")
                 .then(Commands.literal("start")
-                        .then(Commands.argument("config_id", StringArgumentType.word())
-                                .suggests((context, builder) -> CommandSuggestions.suggestConfigIds(builder))
-                                .then(Commands.argument("folder", StringArgumentType.string())
-                                        .suggests((context, builder) -> CommandSuggestions.suggestFolders(
-                                                StringArgumentType.getString(context, "config_id"),
-                                                builder))
-                                        .then(Commands.argument(
-                                                        "minutes",
-                                                        IntegerArgumentType.integer(
-                                                                1,
-                                                                Config.MAX_AUTO_BACKUP_INTERVAL_MINUTES))
-                                                .executes(context -> executeAutoStart(
-                                                        context.getSource(),
-                                                        StringArgumentType.getString(context, "config_id"),
-                                                        StringArgumentType.getString(context, "folder"),
-                                                        IntegerArgumentType.getInteger(context, "minutes")))))))
+                        .then(Commands.argument(
+                                        "minutes",
+                                        IntegerArgumentType.integer(
+                                                1,
+                                                Config.MAX_AUTO_BACKUP_INTERVAL_MINUTES))
+                                .executes(context -> executeAutoStart(
+                                        context.getSource(),
+                                        IntegerArgumentType.getInteger(context, "minutes")))))
                 .then(Commands.literal("stop")
-                        .then(Commands.argument("config_id", StringArgumentType.word())
-                                .suggests((context, builder) -> CommandSuggestions.suggestConfigIds(builder))
-                                .then(Commands.argument("folder", StringArgumentType.string())
-                                        .suggests((context, builder) -> CommandSuggestions.suggestFolders(
-                                                StringArgumentType.getString(context, "config_id"),
-                                                builder))
-                                        .executes(context -> executeAutoStop(
-                                                context.getSource(),
-                                                StringArgumentType.getString(context, "config_id"),
-                                                StringArgumentType.getString(context, "folder"))))));
+                        .executes(context -> executeAutoStop(context.getSource())));
     }
 
     private static int executeBackupCurrent(CommandSourceStack source, String comment) {
-        KnotLinkRequest request = KnotLinkRequest.command("BACKUP")
-                .conversation()
-                .field("current_save", true);
-        if (comment != null && !comment.isBlank()) {
-            request.field("comment", comment);
-        }
-        return execute(source, request, response -> sendSuccessMessage(source, response));
+        OperationHandle<BackupResult> handle = MineBackup.api().backupCurrent(
+                BackupRequest.create(callerId(source), comment));
+        source.sendSuccess(
+                () -> Component.translatable("minebackup.message.command.sent", "BACKUP"),
+                false);
+        observeBackup(source, handle);
+        return handle.phase() == OperationPhase.REJECTED ? 0 : 1;
     }
 
     private static int executeRestoreCurrent(CommandSourceStack source, String file) {
@@ -170,13 +169,12 @@ public final class Command {
             return 0;
         }
         warnAboutVoxy(source);
-        KnotLinkRequest request = KnotLinkRequest.command("RESTORE")
-                .conversation()
-                .field("current_save", true);
-        if (file != null && !file.isBlank()) {
-            request.field("file", file);
-        }
-        return execute(source, request, response -> sendSuccessMessage(source, response));
+        RestoreRequest request = file == null || file.isBlank()
+                ? RestoreRequest.latest(callerId(source))
+                : RestoreRequest.file(callerId(source), file);
+        RestoreHandle handle = MineBackup.api().restoreCurrent(request);
+        observeRestore(source, handle);
+        return handle.phase() == OperationPhase.REJECTED ? 0 : 1;
     }
 
     private static int executeBackupTarget(
@@ -272,31 +270,100 @@ public final class Command {
         });
     }
 
-    private static int executeAutoStart(
-            CommandSourceStack source,
-            String configId,
-            String folder,
-            int minutes) {
-        KnotLinkRequest request = KnotLinkRequest.command("AUTO_BACKUP")
-                .conversation()
-                .field("config_id", configId)
-                .field("folder", folder)
-                .field("interval_minutes", minutes);
-        return execute(source, request, response -> {
-            Config.setAutoBackup(configId, folder, minutes);
-            sendSuccessMessage(source, response);
-        });
+    private static int executeRestoreConfirm(CommandSourceStack source) {
+        Optional<RestoreHandle> pending = MineBackup.api().pendingRestore();
+        if (pending.isEmpty()) {
+            source.sendFailure(Component.translatable("minebackup.message.restore.countdown.not_pending"));
+            return 0;
+        }
+        RestoreControlResult result = pending.get().confirm();
+        if (result == RestoreControlResult.CONFIRMED) {
+            return 1;
+        }
+        source.sendFailure(Component.translatable("minebackup.message.restore.countdown.not_pending"));
+        return 0;
     }
 
-    private static int executeAutoStop(CommandSourceStack source, String configId, String folder) {
-        KnotLinkRequest request = KnotLinkRequest.command("STOP_AUTO_BACKUP")
-                .conversation()
-                .field("config_id", configId)
-                .field("folder", folder);
-        return execute(source, request, response -> {
-            Config.clearAutoBackupIfMatches(configId, folder);
-            sendSuccessMessage(source, response);
-        });
+    private static int executeRestoreStop(CommandSourceStack source) {
+        Optional<RestoreHandle> pending = MineBackup.api().pendingRestore();
+        if (pending.isEmpty()) {
+            source.sendFailure(Component.translatable("minebackup.message.restore.countdown.not_pending"));
+            return 0;
+        }
+        RestoreControlResult result = pending.get().cancel();
+        if (result == RestoreControlResult.CANCELLED) {
+            return 1;
+        }
+        source.sendFailure(Component.translatable("minebackup.message.restore.countdown.not_pending"));
+        return 0;
+    }
+
+    private static int executeAutoStart(CommandSourceStack source, int minutes) {
+        AutoBackupResult result = MineBackup.api().startAutomaticBackup(Duration.ofMinutes(minutes));
+        if (!result.success()) {
+            sendAutoFailure(source, result);
+            return 0;
+        }
+        source.sendSuccess(
+                () -> Component.translatable("minebackup.message.auto.started", minutes),
+                true);
+        return 1;
+    }
+
+    private static int executeAutoStop(CommandSourceStack source) {
+        AutoBackupResult result = MineBackup.api().stopAutomaticBackup();
+        if (!result.success()) {
+            sendAutoFailure(source, result);
+            return 0;
+        }
+        source.sendSuccess(
+                () -> Component.translatable("minebackup.message.auto.stopped"),
+                true);
+        return 1;
+    }
+
+    private static void observeBackup(
+            CommandSourceStack source,
+            OperationHandle<BackupResult> handle) {
+        handle.completion().thenAccept(result -> source.getServer().executeIfPossible(() -> {
+            if (result.outcome() == BackupResult.Outcome.NO_CHANGES) {
+                source.sendSuccess(
+                        () -> Component.translatable("minebackup.message.backup.no_changes"),
+                        false);
+            } else if (result.outcome() == BackupResult.Outcome.REJECTED
+                    || result.outcome() == BackupResult.Outcome.FAILED) {
+                sendOperationFailure(source, result.failure());
+            }
+        }));
+    }
+
+    private static void observeRestore(CommandSourceStack source, RestoreHandle handle) {
+        handle.completion().thenAccept(result -> source.getServer().executeIfPossible(() -> {
+            if (result.outcome() == RestoreResult.Outcome.REJECTED
+                    || result.outcome() == RestoreResult.Outcome.FAILED) {
+                sendOperationFailure(source, result.failure());
+            }
+        }));
+    }
+
+    private static void sendAutoFailure(CommandSourceStack source, AutoBackupResult result) {
+        sendOperationFailure(source, result.failure());
+    }
+
+    private static void sendOperationFailure(
+            CommandSourceStack source,
+            Optional<OperationFailure> failure) {
+        String message = failure.map(OperationFailure::message).orElse("Unknown operation failure");
+        source.sendFailure(Component.translatable(
+                "minebackup.message.command.fail",
+                Component.literal(message)));
+    }
+
+    private static String callerId(CommandSourceStack source) {
+        ServerPlayer player = source.getPlayer();
+        return player == null
+                ? "minebackup:console"
+                : "minebackup:player/" + player.getGameProfile().id();
     }
 
     private static int execute(

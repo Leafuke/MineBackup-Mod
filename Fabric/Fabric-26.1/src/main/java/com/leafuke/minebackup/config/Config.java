@@ -27,9 +27,12 @@ public final class Config {
     private static final int CLIENT_RECONNECT_RETRY_INTERVAL_TICKS_DEFAULT = 100;
     private static final int CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT = 1800;
     private static final boolean UPDATE_CHECK_ENABLED_DEFAULT = true;
+    private static final int RESTORE_COUNTDOWN_SECONDS_DEFAULT = 10;
+    public static final int MAX_RESTORE_COUNTDOWN_SECONDS = 300;
     public static final int MAX_AUTO_BACKUP_INTERVAL_MINUTES = 525_600;
 
     private static final AtomicReference<Snapshot> CURRENT = new AtomicReference<>(defaults());
+    private static boolean legacyAutoBackupMigrationPending;
 
     private Config() {
     }
@@ -64,53 +67,60 @@ public final class Config {
         return CURRENT.get();
     }
 
-    public static synchronized void setAutoBackup(String configId, String folder, int intervalMinutes) {
-        String normalizedConfigId = normalize(configId);
-        String normalizedFolder = normalize(folder);
-        if (normalizedConfigId == null
-                || normalizedFolder == null
-                || intervalMinutes < 1
+    public static synchronized boolean setAutoBackup(int intervalMinutes) {
+        if (intervalMinutes < 1
                 || intervalMinutes > MAX_AUTO_BACKUP_INTERVAL_MINUTES) {
             throw new IllegalArgumentException("Invalid automatic backup settings");
         }
 
         Snapshot updated = CURRENT.get().withAutoBackup(
-                new AutoBackup(normalizedConfigId, normalizedFolder, intervalMinutes));
-        CURRENT.set(updated);
-        write(updated);
-    }
-
-    public static synchronized void clearAutoBackup() {
-        Snapshot updated = CURRENT.get().withAutoBackup(null);
-        CURRENT.set(updated);
-        write(updated);
-    }
-
-    public static synchronized void clearAutoBackupIfMatches(String configId, String folder) {
-        AutoBackup current = CURRENT.get().autoBackup();
-        String normalizedConfigId = normalize(configId);
-        String normalizedFolder = normalize(folder);
-        if (current == null
-                || !current.configId().equals(normalizedConfigId)
-                || !current.folder().equals(normalizedFolder)) {
-            return;
+                new AutoBackup(intervalMinutes));
+        if (!write(updated)) {
+            return false;
         }
-        clearAutoBackup();
+        CURRENT.set(updated);
+        return true;
     }
 
-    private static Snapshot fromProperties(Properties properties) {
-        String configId = first(properties, "auto.configId", "configId");
-        String folder = first(properties, "auto.folder", "worldIndex");
+    public static synchronized boolean clearAutoBackup() {
+        Snapshot updated = CURRENT.get().withAutoBackup(null);
+        if (!write(updated)) {
+            return false;
+        }
+        CURRENT.set(updated);
+        return true;
+    }
+
+    public static synchronized boolean consumeLegacyAutoBackupMigrationNotice() {
+        boolean pending = legacyAutoBackupMigrationPending;
+        legacyAutoBackupMigrationPending = false;
+        return pending;
+    }
+
+    static Snapshot fromProperties(Properties properties) {
+        boolean hasLegacyAutoBackup = properties.containsKey("auto.configId")
+                || properties.containsKey("auto.folder")
+                || properties.containsKey("auto.intervalMinutes")
+                || properties.containsKey("configId")
+                || properties.containsKey("worldIndex")
+                || properties.containsKey("internalTime");
+        if (hasLegacyAutoBackup) {
+            legacyAutoBackupMigrationPending = true;
+        }
+
         int intervalMinutes = parseInt(
-                first(properties, "auto.intervalMinutes", "internalTime"),
+                properties.getProperty("auto.currentWorld.intervalMinutes"),
                 -1,
                 -1,
                 MAX_AUTO_BACKUP_INTERVAL_MINUTES);
-        AutoBackup autoBackup = normalize(configId) != null
-                && normalize(folder) != null
-                && intervalMinutes >= 1
-                ? new AutoBackup(normalize(configId), normalize(folder), intervalMinutes)
+        AutoBackup autoBackup = intervalMinutes >= 1
+                ? new AutoBackup(intervalMinutes)
                 : null;
+        Restore restore = new Restore(parseInt(
+                properties.getProperty("restore.countdownSeconds"),
+                RESTORE_COUNTDOWN_SECONDS_DEFAULT,
+                0,
+                MAX_RESTORE_COUNTDOWN_SECONDS));
 
         HostReopen hostReopen = new HostReopen(
                 parseBoolean(first(properties, "lan.hostReopen.enabled", "autoReopenLanAfterRestore"),
@@ -140,17 +150,20 @@ public final class Config {
         boolean updateCheckEnabled = parseBoolean(
                 first(properties, "updateCheck.enabled", "enableUpdateCheck"),
                 UPDATE_CHECK_ENABLED_DEFAULT);
-        return new Snapshot(autoBackup, hostReopen, clientReconnect, updateCheckEnabled);
+        return new Snapshot(autoBackup, restore, hostReopen, clientReconnect, updateCheckEnabled);
     }
 
-    private static Properties toProperties(Snapshot snapshot) {
+    static Properties toProperties(Snapshot snapshot) {
         Properties properties = new Properties();
         AutoBackup autoBackup = snapshot.autoBackup();
         if (autoBackup != null) {
-            properties.setProperty("auto.configId", autoBackup.configId());
-            properties.setProperty("auto.folder", autoBackup.folder());
-            properties.setProperty("auto.intervalMinutes", String.valueOf(autoBackup.intervalMinutes()));
+            properties.setProperty(
+                    "auto.currentWorld.intervalMinutes",
+                    String.valueOf(autoBackup.intervalMinutes()));
         }
+        properties.setProperty(
+                "restore.countdownSeconds",
+                String.valueOf(snapshot.restore().countdownSeconds()));
 
         HostReopen host = snapshot.hostReopen();
         properties.setProperty("lan.hostReopen.enabled", String.valueOf(host.enabled()));
@@ -180,7 +193,7 @@ public final class Config {
         return true;
     }
 
-    private static void write(Snapshot snapshot) {
+    private static boolean write(Snapshot snapshot) {
         Path target = configPath();
         Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
         try {
@@ -195,8 +208,10 @@ public final class Config {
             } catch (AtomicMoveNotSupportedException exception) {
                 Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
             }
+            return true;
         } catch (IOException exception) {
             MineBackup.LOGGER.error("Failed to save MineBackup config", exception);
+            return false;
         } finally {
             try {
                 Files.deleteIfExists(temporary);
@@ -213,6 +228,7 @@ public final class Config {
     private static Snapshot defaults() {
         return new Snapshot(
                 null,
+                new Restore(RESTORE_COUNTDOWN_SECONDS_DEFAULT),
                 new HostReopen(
                         HOST_REOPEN_ENABLED_DEFAULT,
                         HOST_REOPEN_RETRY_COUNT_DEFAULT,
@@ -229,14 +245,6 @@ public final class Config {
     private static String first(Properties properties, String canonicalKey, String legacyKey) {
         String canonical = properties.getProperty(canonicalKey);
         return canonical != null ? canonical : properties.getProperty(legacyKey);
-    }
-
-    private static String normalize(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private static int parseInt(String value, int fallback, int minimum, int maximum) {
@@ -263,25 +271,33 @@ public final class Config {
 
     public record Snapshot(
             AutoBackup autoBackup,
+            Restore restore,
             HostReopen hostReopen,
             ClientReconnect clientReconnect,
             boolean updateCheckEnabled) {
         public Snapshot {
+            Objects.requireNonNull(restore, "restore");
             Objects.requireNonNull(hostReopen, "hostReopen");
             Objects.requireNonNull(clientReconnect, "clientReconnect");
         }
 
         public Snapshot withAutoBackup(AutoBackup value) {
-            return new Snapshot(value, hostReopen, clientReconnect, updateCheckEnabled);
+            return new Snapshot(value, restore, hostReopen, clientReconnect, updateCheckEnabled);
         }
     }
 
-    public record AutoBackup(String configId, String folder, int intervalMinutes) {
+    public record AutoBackup(int intervalMinutes) {
         public AutoBackup {
-            Objects.requireNonNull(configId, "configId");
-            Objects.requireNonNull(folder, "folder");
             if (intervalMinutes < 1 || intervalMinutes > MAX_AUTO_BACKUP_INTERVAL_MINUTES) {
                 throw new IllegalArgumentException("Automatic backup interval is outside the supported range");
+            }
+        }
+    }
+
+    public record Restore(int countdownSeconds) {
+        public Restore {
+            if (countdownSeconds < 0 || countdownSeconds > MAX_RESTORE_COUNTDOWN_SECONDS) {
+                throw new IllegalArgumentException("Restore countdown is outside the supported range");
             }
         }
     }

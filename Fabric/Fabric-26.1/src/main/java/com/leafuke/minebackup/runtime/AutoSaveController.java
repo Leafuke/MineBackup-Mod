@@ -13,8 +13,18 @@ public final class AutoSaveController {
     private static final long FREEZE_TIMEOUT_NANOS = Duration.ofMinutes(3).toNanos();
 
     private final List<ServerLevel> frozenLevels = new ArrayList<>();
+    private final Runnable timeoutListener;
     private boolean frozen;
     private long freezeDeadlineNanos;
+
+    public AutoSaveController() {
+        this(() -> {
+        });
+    }
+
+    public AutoSaveController(Runnable timeoutListener) {
+        this.timeoutListener = java.util.Objects.requireNonNull(timeoutListener, "timeoutListener");
+    }
 
     public synchronized boolean freeze(MinecraftServer server) {
         if (frozen) {
@@ -66,6 +76,7 @@ public final class AutoSaveController {
 
         MineBackup.LOGGER.error("Auto-save freeze timed out; forcing resume.");
         if (unfreeze()) {
+            timeoutListener.run();
             server.getPlayerList().broadcastSystemMessage(
                     Component.translatable("minebackup.broadcast.autosave.timeout"),
                     false);

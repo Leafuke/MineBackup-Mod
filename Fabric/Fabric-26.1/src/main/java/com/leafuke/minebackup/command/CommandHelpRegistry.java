@@ -18,6 +18,8 @@ public final class CommandHelpRegistry {
             entry("backup", "[comment]", "minebackup.help.summary.backup_current", "/mb backup before_boss"),
             entry("restore", "[file]", "minebackup.help.summary.restore_current",
                     "/mb restore \"[Full] world backup.7z\""),
+            entry("confirm", "", "minebackup.help.summary.restore_confirm", "/mb confirm"),
+            entry("stop", "", "minebackup.help.summary.restore_stop", "/mb stop"),
             entry("target backup", "<config_id> <folder> [comment]",
                     "minebackup.help.summary.backup_target",
                     "/mb target backup d34ab6e8 0 before_boss"),
@@ -29,10 +31,10 @@ public final class CommandHelpRegistry {
                     "/mb list folders d34ab6e8"),
             entry("list backups", "<config_id> <folder>", "minebackup.help.summary.list_backups",
                     "/mb list backups d34ab6e8 0"),
-            entry("auto start", "<config_id> <folder> <minutes>", "minebackup.help.summary.auto_start",
-                    "/mb auto start d34ab6e8 0 30"),
-            entry("auto stop", "<config_id> <folder>", "minebackup.help.summary.auto_stop",
-                    "/mb auto stop d34ab6e8 0")
+            entry("auto start", "<minutes>", "minebackup.help.summary.auto_start",
+                    "/mb auto start 30"),
+            entry("auto stop", "", "minebackup.help.summary.auto_stop",
+                    "/mb auto stop")
     );
     private static final Map<String, HelpEntry> LOOKUP = buildLookup();
 

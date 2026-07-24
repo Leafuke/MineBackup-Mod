@@ -1,6 +1,7 @@
 package com.leafuke.minebackup;
 
 import com.leafuke.minebackup.command.Command;
+import com.leafuke.minebackup.api.v1.MineBackupApi;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
 import com.leafuke.minebackup.runtime.MineBackupRuntime;
 import net.fabricmc.api.ModInitializer;
@@ -31,8 +32,12 @@ public final class MineBackup implements ModInitializer {
         return RUNTIME.knotLink();
     }
 
-    public static void completeClientRestore() {
-        RUNTIME.completeClientRestore();
+    public static MineBackupApi api() {
+        return RUNTIME;
+    }
+
+    public static void completeClientRestore(boolean success, String reason) {
+        RUNTIME.completeClientRestore(success, reason);
     }
 
     public static void shutdownClient() {

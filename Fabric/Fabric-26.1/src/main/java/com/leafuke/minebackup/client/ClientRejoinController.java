@@ -149,7 +149,7 @@ public final class ClientRejoinController {
         if (completedInfo != null) {
             scheduleLanReopen(completedInfo);
         }
-        MineBackup.completeClientRestore();
+        MineBackup.completeClientRestore(true, null);
         if (client.player != null) {
             client.player.sendSystemMessage(Component.translatable(
                     "minebackup.message.restore.success_overlay"));
@@ -163,7 +163,7 @@ public final class ClientRejoinController {
         reportResult("failure", reason);
         resetRejoinState();
         resetLanReopenState();
-        MineBackup.completeClientRestore();
+        MineBackup.completeClientRestore(false, reason);
         try {
             client.setScreen(new SelectWorldScreen(new TitleScreen()));
         } catch (RuntimeException exception) {

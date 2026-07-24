@@ -2,6 +2,15 @@ package com.leafuke.minebackup.runtime;
 
 import com.leafuke.minebackup.MineBackup;
 import com.leafuke.minebackup.ModInfo;
+import com.leafuke.minebackup.api.v1.AutoBackupResult;
+import com.leafuke.minebackup.api.v1.AutoBackupState;
+import com.leafuke.minebackup.api.v1.BackupRequest;
+import com.leafuke.minebackup.api.v1.BackupResult;
+import com.leafuke.minebackup.api.v1.MineBackupApi;
+import com.leafuke.minebackup.api.v1.OperationFailure;
+import com.leafuke.minebackup.api.v1.OperationHandle;
+import com.leafuke.minebackup.api.v1.RestoreHandle;
+import com.leafuke.minebackup.api.v1.RestoreRequest;
 import com.leafuke.minebackup.client.ClientHooks;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
@@ -11,7 +20,10 @@ import com.leafuke.minebackup.update.VersionNumber;
 import com.mojang.authlib.GameProfile;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.LevelResource;
@@ -33,18 +45,29 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public final class MineBackupRuntime implements AutoCloseable {
+public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     private static final String MINIMUM_MAIN_VERSION = "1.14.0";
     private static final long RELEASE_TIMEOUT_NANOS = Duration.ofSeconds(8).toNanos();
     private static final int READY_STREAK_REQUIRED = 3;
 
     private final KnotLinkClient knotLink = new KnotLinkClient();
     private final RestoreSession restoreSession = new RestoreSession();
-    private final AutoSaveController autoSave = new AutoSaveController();
     private final ScheduledExecutorService coordinator = Executors.newSingleThreadScheduledExecutor(
             daemonThreadFactory());
+    private final CurrentWorldOperationCoordinator operations = new CurrentWorldOperationCoordinator(
+            knotLink::query,
+            coordinator,
+            () -> this.operationsAvailable,
+            () -> this.dedicatedServer,
+            () -> Config.get().restore().countdownSeconds(),
+            countdownListener());
+    private final AutoSaveController autoSave =
+            new AutoSaveController(operations::failActiveBackupTimeout);
+    private final AutoBackupScheduler automaticBackups =
+            new AutoBackupScheduler(operations, coordinator);
 
     private volatile MinecraftServer server;
+    private volatile boolean operationsAvailable;
     private volatile boolean dedicatedServer;
     private volatile String lastHandshakeNoticeVersion;
     private volatile ReleasePoller releasePoller;
@@ -60,44 +83,40 @@ public final class MineBackupRuntime implements AutoCloseable {
         return knotLink;
     }
 
-    public void completeClientRestore() {
+    public void completeClientRestore(boolean success, String reason) {
+        operations.completeClientRejoin(success, reason);
         restoreSession.reset();
     }
 
     private void onServerStarting(MinecraftServer startingServer) {
         server = startingServer;
+        operationsAvailable = true;
         dedicatedServer = startingServer.isDedicatedServer();
         lastHandshakeNoticeVersion = null;
-        Config.Snapshot config = Config.load();
+        Config.load();
         knotLink.startSubscriber(this::handleSignal);
+        automaticBackups.serverStarted();
 
         if (dedicatedServer) {
             MineBackup.LOGGER.info(
                     "MineBackup 3 is running on a dedicated server. Restore commands remain disabled.");
         }
 
-        Config.AutoBackup autoBackup = config.autoBackup();
-        if (autoBackup != null) {
-            KnotLinkRequest request = KnotLinkRequest.command("AUTO_BACKUP")
-                    .conversation()
-                    .field("config_id", autoBackup.configId())
-                    .field("folder", autoBackup.folder())
-                    .field("interval_minutes", autoBackup.intervalMinutes());
-            knotLink.query(request).whenComplete((response, error) -> {
-                if (error != null) {
-                    MineBackup.LOGGER.warn("Failed to restore automatic backup schedule", error);
-                } else if (!response.isOk()) {
-                    MineBackup.LOGGER.warn(
-                            "Backend rejected persisted automatic backup schedule: {}",
-                            response.displayMessage());
-                } else {
-                    MineBackup.LOGGER.info("Restored persisted automatic backup schedule.");
-                }
-            });
+        if (Config.consumeLegacyAutoBackupMigrationNotice()) {
+            MineBackup.LOGGER.warn(
+                    "Disabled legacy target-based automatic backup. Run /mb auto start <minutes> to configure current-world hot backup.");
+            startingServer.executeIfPossible(() ->
+                    startingServer.getPlayerList().broadcastSystemMessage(
+                            Component.translatable("minebackup.message.auto.legacy_disabled"),
+                            false));
         }
     }
 
     private void onServerStopping(MinecraftServer stoppingServer) {
+        operationsAvailable = false;
+        automaticBackups.serverStopped();
+        operations.serverStopping(
+                restoreSession.phase() != RestoreSession.Phase.IDLE);
         if (autoSave.unfreeze()) {
             MineBackup.LOGGER.warn("Server stopped while auto-save was frozen; save state was restored.");
         }
@@ -114,6 +133,7 @@ public final class MineBackupRuntime implements AutoCloseable {
         }
         if (server == stoppedServer) {
             server = null;
+            operationsAvailable = false;
         }
         if (restoreSession.phase() == RestoreSession.Phase.IDLE) {
             restoreSession.reset();
@@ -126,6 +146,12 @@ public final class MineBackupRuntime implements AutoCloseable {
             return;
         }
 
+        if (isBackupTerminal(fields, event)) {
+            handleBackupTerminal(fields, event);
+            return;
+        }
+        operations.handleSignal(fields);
+
         switch (event) {
             case "handshake" -> handleHandshake(fields);
             case "pre_hot_backup" -> handlePreHotBackup(fields);
@@ -135,7 +161,6 @@ public final class MineBackupRuntime implements AutoCloseable {
                     fields,
                     "minebackup.message.restore.cancelled");
             case "rejoin_world" -> handleRejoinWorld(fields);
-            case "backup_success", "backup_failed" -> handleBackupTerminal(fields, event);
             default -> broadcastInformationalEvent(fields, event);
         }
     }
@@ -233,12 +258,18 @@ public final class MineBackupRuntime implements AutoCloseable {
         }
         currentServer.executeIfPossible(() -> {
             if (!LocalSaveCoordinator.save(currentServer)) {
+                operations.failActiveBackup(
+                        OperationFailure.Code.SAVE_TIMEOUT,
+                        "Minecraft could not save the current world");
                 currentServer.getPlayerList().broadcastSystemMessage(
                         Component.translatable("minebackup.broadcast.hot_backup.save_failed"),
                         false);
                 return;
             }
             if (!autoSave.freeze(currentServer)) {
+                operations.failActiveBackup(
+                        OperationFailure.Code.BUSY,
+                        "Minecraft automatic saving is already frozen");
                 return;
             }
 
@@ -262,6 +293,11 @@ public final class MineBackupRuntime implements AutoCloseable {
                         }
                         currentServer.executeIfPossible(() -> {
                             autoSave.unfreeze();
+                            operations.failActiveBackup(
+                                    OperationFailure.Code.BACKEND_REJECTED,
+                                    error == null
+                                            ? response.displayMessage()
+                                            : error.getMessage());
                             currentServer.getPlayerList().broadcastSystemMessage(
                                     Component.translatable("minebackup.broadcast.hot_backup.ack_failed"),
                                     false);
@@ -280,10 +316,23 @@ public final class MineBackupRuntime implements AutoCloseable {
                             false);
                 }
                 broadcastInformationalEventOnServer(currentServer, fields, event);
+                operations.handleSignal(fields);
             });
         } else {
             autoSave.unfreeze();
+            operations.handleSignal(fields);
         }
+    }
+
+    private static boolean isBackupTerminal(Map<String, String> fields, String event) {
+        if ("backup_success".equals(event) || "backup_failed".equals(event)) {
+            return true;
+        }
+        if (!"command_completed".equals(event) && !"command_failed".equals(event)) {
+            return false;
+        }
+        String command = fields.get("command");
+        return command == null || "BACKUP".equalsIgnoreCase(command);
     }
 
     private void handlePreHotRestore(Map<String, String> fields) {
@@ -294,6 +343,11 @@ public final class MineBackupRuntime implements AutoCloseable {
 
         MinecraftServer currentServer = server;
         if (currentServer == null || dedicatedServer) {
+            operations.failActiveRestore(
+                    dedicatedServer
+                            ? OperationFailure.Code.UNSUPPORTED_DEDICATED_SERVER
+                            : OperationFailure.Code.NO_ACTIVE_SERVER,
+                    "Hot restore cannot start without an integrated server");
             return;
         }
         currentServer.executeIfPossible(() -> beginIntegratedRestore(currentServer));
@@ -310,12 +364,18 @@ public final class MineBackupRuntime implements AutoCloseable {
             levelId = resolveLevelId(currentServer);
         } catch (IllegalStateException exception) {
             MineBackup.LOGGER.error("Unable to identify the integrated world for hot restore", exception);
+            operations.failActiveRestore(
+                    OperationFailure.Code.RESTORE_FAILED,
+                    exception.getMessage());
             currentServer.getPlayerList().broadcastSystemMessage(
                     Component.translatable("minebackup.message.restore.failed"),
                     false);
             return;
         }
         if (!LocalSaveCoordinator.save(currentServer)) {
+            operations.failActiveRestore(
+                    OperationFailure.Code.RESTORE_FAILED,
+                    "Minecraft could not save the current world before restore");
             currentServer.getPlayerList().broadcastSystemMessage(
                     Component.translatable("minebackup.message.restore.failed"),
                     false);
@@ -324,6 +384,9 @@ public final class MineBackupRuntime implements AutoCloseable {
 
         LanState lanState = captureLanState(currentServer);
         if (!restoreSession.beginRestore(levelId, lanState.reopen(), lanState.port())) {
+            operations.failActiveRestore(
+                    OperationFailure.Code.BUSY,
+                    "Restore session is not ready");
             return;
         }
 
@@ -379,6 +442,9 @@ public final class MineBackupRuntime implements AutoCloseable {
             return;
         }
         restoreSession.reset();
+        operations.failActiveRestore(
+                OperationFailure.Code.RESTORE_FAILED,
+                translationKey);
         ClientHooks.restoreFailed(Component.translatable(translationKey));
     }
 
@@ -414,7 +480,6 @@ public final class MineBackupRuntime implements AutoCloseable {
             case "restore_started" -> Component.translatable("minebackup.broadcast.restore.started", world);
             case "restore_success" -> Component.translatable("minebackup.broadcast.restore.success", world);
             case "restore_failed" -> Component.translatable("minebackup.broadcast.restore.failed", world, error);
-            case "auto_backup_started" -> Component.translatable("minebackup.broadcast.auto_backup.started", world);
             default -> null;
         };
         if (message != null) {
@@ -568,13 +633,109 @@ public final class MineBackupRuntime implements AutoCloseable {
     @Override
     public void close() {
         ClientHooks.clear();
+        operationsAvailable = false;
         restoreSession.reset();
+        automaticBackups.close();
+        operations.close();
         MinecraftServer currentServer = server;
         if (currentServer != null) {
             currentServer.executeIfPossible(autoSave::unfreeze);
         }
         knotLink.close();
         coordinator.shutdownNow();
+    }
+
+    @Override
+    public int apiVersion() {
+        return MineBackupApi.API_VERSION;
+    }
+
+    @Override
+    public OperationHandle<BackupResult> backupCurrent(BackupRequest request) {
+        return operations.backupCurrent(request);
+    }
+
+    @Override
+    public RestoreHandle restoreCurrent(RestoreRequest request) {
+        return operations.restoreCurrent(request);
+    }
+
+    @Override
+    public Optional<RestoreHandle> pendingRestore() {
+        return operations.pendingRestore();
+    }
+
+    @Override
+    public AutoBackupResult startAutomaticBackup(Duration interval) {
+        return automaticBackups.start(interval);
+    }
+
+    @Override
+    public AutoBackupResult stopAutomaticBackup() {
+        return automaticBackups.stop();
+    }
+
+    @Override
+    public AutoBackupState automaticBackupState() {
+        return automaticBackups.state();
+    }
+
+    private CurrentWorldOperationCoordinator.CountdownListener countdownListener() {
+        return new CurrentWorldOperationCoordinator.CountdownListener() {
+            @Override
+            public void onStarted(RestoreHandle handle, int seconds) {
+                broadcast(Component.translatable(
+                        "minebackup.message.restore.countdown.started",
+                        seconds));
+            }
+
+            @Override
+            public void onTick(RestoreHandle handle, int seconds) {
+                MutableComponent message = Component.translatable(
+                        "minebackup.message.restore.countdown.tick",
+                        seconds);
+                message.append(Component.literal(" "));
+                message.append(actionLink(
+                        "minebackup.message.restore.countdown.confirm",
+                        "/mb confirm"));
+                message.append(Component.literal(" "));
+                message.append(actionLink(
+                        "minebackup.message.restore.countdown.cancel",
+                        "/mb stop"));
+                broadcast(message);
+            }
+
+            @Override
+            public void onConfirmed(RestoreHandle handle) {
+                // onSubmitted emits the single player-facing transition message.
+            }
+
+            @Override
+            public void onCancelled(RestoreHandle handle) {
+                broadcast(Component.translatable("minebackup.message.restore.countdown.cancelled"));
+            }
+
+            @Override
+            public void onSubmitted(RestoreHandle handle) {
+                broadcast(Component.translatable("minebackup.message.restore.countdown.submitted"));
+            }
+        };
+    }
+
+    private static MutableComponent actionLink(String translationKey, String command) {
+        return Component.translatable(translationKey).withStyle(style -> style
+                .withClickEvent(new ClickEvent.RunCommand(command))
+                .withHoverEvent(new HoverEvent.ShowText(
+                        Component.translatable(translationKey)))
+                .withUnderlined(true));
+    }
+
+    private void broadcast(Component message) {
+        MinecraftServer currentServer = server;
+        if (currentServer != null) {
+            currentServer.executeIfPossible(() ->
+                    currentServer.getPlayerList().broadcastSystemMessage(message, false));
+        }
     }
 
     private static ThreadFactory daemonThreadFactory() {
@@ -620,6 +781,9 @@ public final class MineBackupRuntime implements AutoCloseable {
             if (System.nanoTime() >= deadlineNanos) {
                 MineBackup.LOGGER.error("Timed out waiting for integrated server files to be released.");
                 restoreSession.reset();
+                operations.failActiveRestore(
+                        OperationFailure.Code.RESTORE_FAILED,
+                        "Timed out waiting for integrated server files to be released");
                 ClientHooks.restoreFailed(Component.translatable("minebackup.message.restore.release_timeout"));
                 cancel();
                 return;
@@ -652,6 +816,11 @@ public final class MineBackupRuntime implements AutoCloseable {
                                     response.displayMessage());
                         }
                         restoreSession.reset();
+                        operations.failActiveRestore(
+                                OperationFailure.Code.BACKEND_REJECTED,
+                                error == null
+                                        ? response.displayMessage()
+                                        : error.getMessage());
                         ClientHooks.restoreFailed(Component.translatable(
                                 "minebackup.message.restore.ack_failed"));
                     });
