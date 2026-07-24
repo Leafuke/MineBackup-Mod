@@ -114,6 +114,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                 .conversation(handle.id())
                 .field("current_save", true);
         request.comment().ifPresent(comment -> command.field("comment", comment));
+        request.parameters().forEach(command::field);
         submitBackup(handle, command);
         return handle;
     }
@@ -292,6 +293,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                 .conversation(handle.id())
                 .field("current_save", true);
         handle.request().fileName().ifPresent(file -> command.field("file", file));
+        handle.request().parameters().forEach(command::field);
         knotLink.query(command).whenComplete((response, error) -> {
             if (error != null) {
                 failRestore(handle, OperationFailure.Code.COMMUNICATION_ERROR, error.getMessage());

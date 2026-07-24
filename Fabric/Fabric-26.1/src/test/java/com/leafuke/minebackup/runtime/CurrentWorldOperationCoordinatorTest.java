@@ -10,6 +10,7 @@ import com.leafuke.minebackup.api.v1.RestoreHandle;
 import com.leafuke.minebackup.api.v1.RestoreRequest;
 import com.leafuke.minebackup.api.v1.RestoreResult;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
+import com.leafuke.minebackup.knotlink.protocol.KnotLinkCodec;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -63,6 +64,37 @@ class CurrentWorldOperationCoordinatorTest {
         assertEquals(BackupResult.Outcome.CREATED, result.outcome());
         assertEquals(Optional.of("snapshot.7z"), result.fileName());
         assertEquals(OperationPhase.SUCCEEDED, handle.phase());
+    }
+
+    @Test
+    void backupAndRestoreAdditionalParametersReachKnotLink() throws Exception {
+        CurrentWorldOperationCoordinator coordinator = coordinator();
+        var backup = coordinator.backupCurrent(
+                BackupRequest.create("test")
+                        .withParameter("backup_mode", "incremental")
+                        .withParameter("compression_method", "zstd level=9"));
+
+        Map<String, String> backupFields =
+                KnotLinkCodec.parse(gateway.requests.getFirst().serialize());
+        assertEquals("incremental", backupFields.get("backup_mode"));
+        assertEquals("zstd level=9", backupFields.get("compression_method"));
+        assertEquals("true", backupFields.get("current_save"));
+
+        coordinator.handleSignal(Map.of(
+                "event", "backup_success",
+                "request_id", backup.id().toString(),
+                "file", "snapshot.7z"));
+
+        RestoreHandle restore = coordinator.restoreCurrent(
+                RestoreRequest.file("test", "snapshot.7z")
+                        .withParameter("verify_archive", "true"));
+        restore.confirm();
+
+        Map<String, String> restoreFields =
+                KnotLinkCodec.parse(gateway.requests.get(1).serialize());
+        assertEquals("true", restoreFields.get("verify_archive"));
+        assertEquals("snapshot.7z", restoreFields.get("file"));
+        assertEquals("true", restoreFields.get("current_save"));
     }
 
     @Test
