@@ -1,11 +1,10 @@
 package com.leafuke.minebackup.runtime;
 
 import com.leafuke.minebackup.MineBackup;
-import com.leafuke.minebackup.api.v1.AutoBackupResult;
-import com.leafuke.minebackup.api.v1.AutoBackupState;
-import com.leafuke.minebackup.api.v1.BackupRequest;
-import com.leafuke.minebackup.api.v1.BackupResult;
-import com.leafuke.minebackup.api.v1.OperationFailure;
+import com.leafuke.minebackup.api.v2.AutoBackupState;
+import com.leafuke.minebackup.api.v2.BackupRequest;
+import com.leafuke.minebackup.api.v2.BackupResult;
+import com.leafuke.minebackup.api.v2.OperationFailure;
 import com.leafuke.minebackup.config.Config;
 
 import java.time.Clock;
@@ -59,7 +58,7 @@ final class AutoBackupScheduler implements AutoCloseable {
         cancelFutureLocked();
     }
 
-    AutoBackupResult start(Duration interval) {
+    AutoBackupUpdateResult start(Duration interval) {
         int minutes = validateInterval(interval);
         if (!Config.setAutoBackup(minutes)) {
             return failure(OperationFailure.Code.CONFIG_WRITE_FAILED, "Failed to persist automatic backup");
@@ -72,7 +71,7 @@ final class AutoBackupScheduler implements AutoCloseable {
         }
     }
 
-    AutoBackupResult stop() {
+    AutoBackupUpdateResult stop() {
         if (!Config.clearAutoBackup()) {
             return failure(OperationFailure.Code.CONFIG_WRITE_FAILED, "Failed to persist automatic backup");
         }
@@ -160,12 +159,12 @@ final class AutoBackupScheduler implements AutoCloseable {
                 Optional.ofNullable(nextRun));
     }
 
-    private AutoBackupResult success(AutoBackupState state) {
-        return new AutoBackupResult(true, state, Optional.empty());
+    private AutoBackupUpdateResult success(AutoBackupState state) {
+        return new AutoBackupUpdateResult(true, state, Optional.empty());
     }
 
-    private AutoBackupResult failure(OperationFailure.Code code, String message) {
-        return new AutoBackupResult(
+    private AutoBackupUpdateResult failure(OperationFailure.Code code, String message) {
+        return new AutoBackupUpdateResult(
                 false,
                 state(),
                 Optional.of(new OperationFailure(code, message)));

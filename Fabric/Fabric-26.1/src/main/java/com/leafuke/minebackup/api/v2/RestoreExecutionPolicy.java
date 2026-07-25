@@ -1,4 +1,4 @@
-package com.leafuke.minebackup.api.v1;
+package com.leafuke.minebackup.api.v2;
 
 public enum RestoreExecutionPolicy {
     CONFIGURED_COUNTDOWN,

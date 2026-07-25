@@ -1,7 +1,7 @@
 package com.leafuke.minebackup.runtime;
 
-import com.leafuke.minebackup.api.v1.OperationHandle;
-import com.leafuke.minebackup.api.v1.OperationPhase;
+import com.leafuke.minebackup.api.v2.OperationHandle;
+import com.leafuke.minebackup.api.v2.OperationPhase;
 
 import java.util.Objects;
 import java.util.UUID;

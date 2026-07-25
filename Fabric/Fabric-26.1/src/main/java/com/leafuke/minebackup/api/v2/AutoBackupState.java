@@ -1,14 +1,11 @@
-package com.leafuke.minebackup.api.v1;
+package com.leafuke.minebackup.api.v2;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 
-public record AutoBackupState(
-        boolean enabled,
-        Optional<Duration> interval,
-        Optional<Instant> nextRun) {
+public record AutoBackupState(boolean enabled, Optional<Duration> interval, Optional<Instant> nextRun) {
     public AutoBackupState {
         Objects.requireNonNull(interval, "interval");
         Objects.requireNonNull(nextRun, "nextRun");

@@ -1,15 +1,17 @@
 package com.leafuke.minebackup.runtime;
 
-import com.leafuke.minebackup.api.v1.BackupRequest;
-import com.leafuke.minebackup.api.v1.BackupResult;
-import com.leafuke.minebackup.api.v1.OperationFailure;
-import com.leafuke.minebackup.api.v1.OperationHandle;
-import com.leafuke.minebackup.api.v1.OperationPhase;
-import com.leafuke.minebackup.api.v1.RestoreControlResult;
-import com.leafuke.minebackup.api.v1.RestoreExecutionPolicy;
-import com.leafuke.minebackup.api.v1.RestoreHandle;
-import com.leafuke.minebackup.api.v1.RestoreRequest;
-import com.leafuke.minebackup.api.v1.RestoreResult;
+import com.leafuke.minebackup.api.v2.BackupId;
+import com.leafuke.minebackup.api.v2.BackupRequest;
+import com.leafuke.minebackup.api.v2.BackupResult;
+import com.leafuke.minebackup.api.v2.OperationFailure;
+import com.leafuke.minebackup.api.v2.OperationHandle;
+import com.leafuke.minebackup.api.v2.OperationPhase;
+import com.leafuke.minebackup.api.v2.OperationSnapshot;
+import com.leafuke.minebackup.api.v2.OperationType;
+import com.leafuke.minebackup.api.v2.OperationPresentation;
+import com.leafuke.minebackup.api.v2.RestoreExecutionPolicy;
+import com.leafuke.minebackup.api.v2.RestoreRequest;
+import com.leafuke.minebackup.api.v2.RestoreResult;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 
@@ -27,15 +29,15 @@ import java.util.function.LongSupplier;
 
 final class CurrentWorldOperationCoordinator implements AutoCloseable {
     interface CountdownListener {
-        void onStarted(RestoreHandle handle, int seconds);
+        void onStarted(InternalRestoreHandle handle, int seconds);
 
-        void onTick(RestoreHandle handle, int seconds);
+        void onTick(InternalRestoreHandle handle, int seconds);
 
-        void onConfirmed(RestoreHandle handle);
+        void onConfirmed(InternalRestoreHandle handle);
 
-        void onCancelled(RestoreHandle handle);
+        void onCancelled(InternalRestoreHandle handle);
 
-        void onSubmitted(RestoreHandle handle);
+        void onSubmitted(InternalRestoreHandle handle);
     }
 
     private final KnotLinkGateway knotLink;
@@ -105,7 +107,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             }
             handle = new BackupOperationHandle(
                     UUID.randomUUID(),
-                    request.callerId(),
+                    request,
                     OperationPhase.SUBMITTING);
             active = handle;
         }
@@ -119,7 +121,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         return handle;
     }
 
-    RestoreHandle restoreCurrent(RestoreRequest request) {
+    InternalRestoreHandle restoreCurrent(RestoreRequest request) {
         Objects.requireNonNull(request, "request");
         RestoreOperationHandle handle;
         int seconds;
@@ -133,7 +135,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             if (dedicatedServer.getAsBoolean()) {
                 return rejectedRestore(
                         request,
-                        OperationFailure.Code.UNSUPPORTED_DEDICATED_SERVER,
+                        OperationFailure.Code.RESTART_UNAVAILABLE,
                         "Hot restore is unavailable on a dedicated server");
             }
             if (hasActiveOperation()) {
@@ -175,12 +177,37 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         return handle;
     }
 
-    synchronized Optional<RestoreHandle> pendingRestore() {
+    synchronized Optional<InternalRestoreHandle> pendingRestore() {
         if (active instanceof RestoreOperationHandle restore
                 && restore.phase() == OperationPhase.COUNTING_DOWN) {
             return Optional.of(restore);
         }
         return Optional.empty();
+    }
+
+    synchronized Optional<OperationSnapshot> activeSnapshot() {
+        if (active == null || active.phase().isTerminal()) {
+            return Optional.empty();
+        }
+        OperationType type = active instanceof RestoreOperationHandle
+                ? OperationType.RESTORE
+                : OperationType.BACKUP;
+        return Optional.of(new OperationSnapshot(
+                active.id(), active.callerId(), type, active.phase()));
+    }
+
+    synchronized boolean isBusy() {
+        return hasActiveOperation();
+    }
+
+    synchronized OperationPresentation activePresentation() {
+        if (active instanceof RestoreOperationHandle restore) {
+            return restore.request().presentation();
+        }
+        if (active instanceof BackupOperationHandle backup) {
+            return backup.request().presentation();
+        }
+        return OperationPresentation.defaults();
     }
 
     void handleSignal(Map<String, String> fields) {
@@ -292,7 +319,8 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         KnotLinkRequest command = KnotLinkRequest.command("RESTORE")
                 .conversation(handle.id())
                 .field("current_save", true);
-        handle.request().fileName().ifPresent(file -> command.field("file", file));
+        handle.request().backupId().ifPresent(file -> command.field("file", file.value()));
+        handle.request().comment().ifPresent(comment -> command.field("comment", comment));
         handle.request().parameters().forEach(command::field);
         knotLink.query(command).whenComplete((response, error) -> {
             if (error != null) {
@@ -353,7 +381,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             cancelCountdownLocked();
             RestoreResult result = new RestoreResult(
                     RestoreResult.Outcome.CANCELLED,
-                    handle.request().fileName(),
+                    handle.request().backupId(),
                     Optional.empty());
             cancelled = handle.finish(OperationPhase.CANCELLED, result);
             if (cancelled) {
@@ -473,10 +501,14 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         OperationPhase phase = outcome == BackupResult.Outcome.CANCELLED
                 ? OperationPhase.CANCELLED
                 : failure == null ? OperationPhase.SUCCEEDED : OperationPhase.FAILED;
-        BackupResult result = new BackupResult(
-                outcome,
-                Optional.ofNullable(file),
-                Optional.ofNullable(failure));
+        Optional<BackupId> backupId;
+        try {
+            backupId = Optional.ofNullable(file).map(BackupId::of);
+        } catch (IllegalArgumentException exception) {
+            failBackup(handle, OperationFailure.Code.PROTOCOL_ERROR, exception.getMessage());
+            return;
+        }
+        BackupResult result = new BackupResult(outcome, backupId, Optional.ofNullable(failure));
         if (handle.finish(phase, result)) {
             release(handle);
         }
@@ -505,14 +537,14 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             RestoreResult.Outcome outcome,
             OperationFailure failure) {
         OperationPhase phase = switch (outcome) {
-            case RESTORED, RESTORED_REJOIN_FAILED -> OperationPhase.SUCCEEDED;
+            case RESTORED, RESTORED_REJOIN_FAILED, RESTART_HANDOFF_ACCEPTED -> OperationPhase.SUCCEEDED;
             case CANCELLED -> OperationPhase.CANCELLED;
             case REJECTED -> OperationPhase.REJECTED;
             case FAILED -> OperationPhase.FAILED;
         };
         RestoreResult result = new RestoreResult(
                 outcome,
-                handle.request().fileName(),
+                handle.request().backupId(),
                 Optional.ofNullable(failure));
         if (handle.finish(phase, result)) {
             release(handle);
@@ -526,7 +558,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         OperationFailure failure = new OperationFailure(code, safeMessage(message, code));
         RestoreResult result = new RestoreResult(
                 RestoreResult.Outcome.FAILED,
-                handle.request().fileName(),
+                handle.request().backupId(),
                 Optional.of(failure));
         if (handle.finish(OperationPhase.FAILED, result)) {
             release(handle);
@@ -539,7 +571,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             String message) {
         BackupOperationHandle handle = new BackupOperationHandle(
                 UUID.randomUUID(),
-                request.callerId(),
+                request,
                 OperationPhase.SUBMITTING);
         OperationFailure failure = new OperationFailure(code, message);
         handle.finish(
@@ -568,7 +600,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                 OperationPhase.REJECTED,
                 new RestoreResult(
                         RestoreResult.Outcome.REJECTED,
-                        request.fileName(),
+                        request.backupId(),
                         Optional.of(failure)));
         return handle;
     }

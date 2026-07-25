@@ -1,22 +1,21 @@
-package com.leafuke.minebackup.api.v1;
+package com.leafuke.minebackup.api.v2;
 
 import java.util.Objects;
 import java.util.Optional;
 
-public record RestoreResult(
+public record BackupResult(
         Outcome outcome,
-        Optional<String> fileName,
+        Optional<BackupId> backupId,
         Optional<OperationFailure> failure) {
-    public RestoreResult {
+    public BackupResult {
         Objects.requireNonNull(outcome, "outcome");
-        Objects.requireNonNull(fileName, "fileName");
+        Objects.requireNonNull(backupId, "backupId");
         Objects.requireNonNull(failure, "failure");
-        fileName = fileName.map(String::trim).filter(value -> !value.isEmpty());
     }
 
     public enum Outcome {
-        RESTORED,
-        RESTORED_REJOIN_FAILED,
+        CREATED,
+        NO_CHANGES,
         CANCELLED,
         REJECTED,
         FAILED

@@ -22,10 +22,10 @@ public final class MineBackupClient implements ClientModInitializer {
         Config.Snapshot config = Config.load();
         ClientHooks.register(new ClientHooks.Handler() {
             @Override
-            public void requestRejoin(RestoreSession.RejoinInfo info) {
+            public void requestRejoin(RestoreSession.RejoinInfo info, RestoreUiMessages messages) {
                 Minecraft client = Minecraft.getInstance();
                 if (client != null) {
-                    ClientRejoinController.requestRejoin(client, info);
+                    ClientRejoinController.requestRejoin(client, info, messages);
                 }
             }
 

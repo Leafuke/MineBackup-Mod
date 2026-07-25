@@ -1,14 +1,12 @@
 package com.leafuke.minebackup.runtime;
 
-import com.leafuke.minebackup.api.v1.BackupRequest;
-import com.leafuke.minebackup.api.v1.BackupResult;
-import com.leafuke.minebackup.api.v1.OperationFailure;
-import com.leafuke.minebackup.api.v1.OperationPhase;
-import com.leafuke.minebackup.api.v1.RestoreControlResult;
-import com.leafuke.minebackup.api.v1.RestoreExecutionPolicy;
-import com.leafuke.minebackup.api.v1.RestoreHandle;
-import com.leafuke.minebackup.api.v1.RestoreRequest;
-import com.leafuke.minebackup.api.v1.RestoreResult;
+import com.leafuke.minebackup.api.v2.BackupRequest;
+import com.leafuke.minebackup.api.v2.BackupResult;
+import com.leafuke.minebackup.api.v2.OperationFailure;
+import com.leafuke.minebackup.api.v2.OperationPhase;
+import com.leafuke.minebackup.api.v2.RestoreExecutionPolicy;
+import com.leafuke.minebackup.api.v2.RestoreRequest;
+import com.leafuke.minebackup.api.v2.RestoreResult;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkCodec;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
@@ -62,7 +60,7 @@ class CurrentWorldOperationCoordinatorTest {
 
         BackupResult result = handle.completion().toCompletableFuture().get(1, TimeUnit.SECONDS);
         assertEquals(BackupResult.Outcome.CREATED, result.outcome());
-        assertEquals(Optional.of("snapshot.7z"), result.fileName());
+        assertEquals("snapshot.7z", result.backupId().orElseThrow().value());
         assertEquals(OperationPhase.SUCCEEDED, handle.phase());
     }
 
@@ -85,7 +83,7 @@ class CurrentWorldOperationCoordinatorTest {
                 "request_id", backup.id().toString(),
                 "file", "snapshot.7z"));
 
-        RestoreHandle restore = coordinator.restoreCurrent(
+        InternalRestoreHandle restore = coordinator.restoreCurrent(
                 RestoreRequest.file("test", "snapshot.7z")
                         .withParameter("verify_archive", "true"));
         restore.confirm();
@@ -129,13 +127,13 @@ class CurrentWorldOperationCoordinatorTest {
 
         BackupResult result = handle.completion().toCompletableFuture().get(1, TimeUnit.SECONDS);
         assertEquals(BackupResult.Outcome.NO_CHANGES, result.outcome());
-        assertTrue(result.fileName().isEmpty());
+        assertTrue(result.backupId().isEmpty());
     }
 
     @Test
     void restoreCanBeCancelledBeforeSubmission() throws Exception {
         CurrentWorldOperationCoordinator coordinator = coordinator();
-        RestoreHandle handle = coordinator.restoreCurrent(RestoreRequest.latest("test"));
+        InternalRestoreHandle handle = coordinator.restoreCurrent(RestoreRequest.latest("test"));
 
         assertEquals(OperationPhase.COUNTING_DOWN, handle.phase());
         assertEquals(0, gateway.requests.size());
@@ -151,7 +149,7 @@ class CurrentWorldOperationCoordinatorTest {
     @Test
     void confirmSubmitsRestoreExactlyOnce() throws Exception {
         CurrentWorldOperationCoordinator coordinator = coordinator();
-        RestoreHandle handle = coordinator.restoreCurrent(
+        InternalRestoreHandle handle = coordinator.restoreCurrent(
                 RestoreRequest.file("test", "snapshot.7z"));
 
         assertEquals(RestoreControlResult.CONFIRMED, handle.confirm());
@@ -168,7 +166,7 @@ class CurrentWorldOperationCoordinatorTest {
     void configuredCountdownExpiresAndSubmits() throws Exception {
         countdownSeconds.set(1);
         CurrentWorldOperationCoordinator coordinator = coordinator();
-        RestoreHandle handle = coordinator.restoreCurrent(RestoreRequest.latest("test"));
+        InternalRestoreHandle handle = coordinator.restoreCurrent(RestoreRequest.latest("test"));
 
         long deadline = System.nanoTime() + Duration.ofSeconds(3).toNanos();
         while (gateway.requests.isEmpty() && System.nanoTime() < deadline) {
@@ -183,12 +181,9 @@ class CurrentWorldOperationCoordinatorTest {
     @Test
     void immediatePolicyBypassesCountdown() {
         CurrentWorldOperationCoordinator coordinator = coordinator();
-        RestoreRequest request = new RestoreRequest(
-                "test",
-                Optional.empty(),
-                RestoreExecutionPolicy.IMMEDIATE);
+        RestoreRequest request = RestoreRequest.latest("test").immediate();
 
-        RestoreHandle handle = coordinator.restoreCurrent(request);
+        InternalRestoreHandle handle = coordinator.restoreCurrent(request);
 
         assertEquals(1, gateway.requests.size());
         assertEquals(OperationPhase.RUNNING, handle.phase());
@@ -200,12 +195,12 @@ class CurrentWorldOperationCoordinatorTest {
         dedicated.set(true);
         CurrentWorldOperationCoordinator coordinator = coordinator();
 
-        RestoreHandle handle = coordinator.restoreCurrent(RestoreRequest.latest("test"));
+        InternalRestoreHandle handle = coordinator.restoreCurrent(RestoreRequest.latest("test"));
         RestoreResult result = handle.completion().toCompletableFuture().get(1, TimeUnit.SECONDS);
 
         assertEquals(RestoreResult.Outcome.REJECTED, result.outcome());
         assertEquals(
-                OperationFailure.Code.UNSUPPORTED_DEDICATED_SERVER,
+                OperationFailure.Code.RESTART_UNAVAILABLE,
                 result.failure().orElseThrow().code());
         assertTrue(gateway.requests.isEmpty());
     }
@@ -213,7 +208,7 @@ class CurrentWorldOperationCoordinatorTest {
     @Test
     void serverStopCancelsPendingRestoreButPreservesSubmittedIntegratedRestore() throws Exception {
         CurrentWorldOperationCoordinator coordinator = coordinator();
-        RestoreHandle pending = coordinator.restoreCurrent(RestoreRequest.latest("pending"));
+        InternalRestoreHandle pending = coordinator.restoreCurrent(RestoreRequest.latest("pending"));
 
         coordinator.serverStopping(false);
         RestoreResult stopped = pending.completion().toCompletableFuture().get(1, TimeUnit.SECONDS);
@@ -222,7 +217,7 @@ class CurrentWorldOperationCoordinatorTest {
                 OperationFailure.Code.SERVER_STOPPED,
                 stopped.failure().orElseThrow().code());
 
-        RestoreHandle submitted = coordinator.restoreCurrent(RestoreRequest.latest("submitted"));
+        InternalRestoreHandle submitted = coordinator.restoreCurrent(RestoreRequest.latest("submitted"));
         submitted.confirm();
         coordinator.serverStopping(true);
         assertFalse(submitted.completion().toCompletableFuture().isDone());
@@ -293,25 +288,25 @@ class CurrentWorldOperationCoordinatorTest {
         private int submitted;
 
         @Override
-        public void onStarted(RestoreHandle handle, int seconds) {
+        public void onStarted(InternalRestoreHandle handle, int seconds) {
             started++;
         }
 
         @Override
-        public void onTick(RestoreHandle handle, int seconds) {
+        public void onTick(InternalRestoreHandle handle, int seconds) {
         }
 
         @Override
-        public void onConfirmed(RestoreHandle handle) {
+        public void onConfirmed(InternalRestoreHandle handle) {
         }
 
         @Override
-        public void onCancelled(RestoreHandle handle) {
+        public void onCancelled(InternalRestoreHandle handle) {
             cancelled++;
         }
 
         @Override
-        public void onSubmitted(RestoreHandle handle) {
+        public void onSubmitted(InternalRestoreHandle handle) {
             submitted++;
         }
     }

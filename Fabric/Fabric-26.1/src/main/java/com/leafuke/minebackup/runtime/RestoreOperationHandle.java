@@ -1,10 +1,8 @@
 package com.leafuke.minebackup.runtime;
 
-import com.leafuke.minebackup.api.v1.OperationPhase;
-import com.leafuke.minebackup.api.v1.RestoreControlResult;
-import com.leafuke.minebackup.api.v1.RestoreHandle;
-import com.leafuke.minebackup.api.v1.RestoreRequest;
-import com.leafuke.minebackup.api.v1.RestoreResult;
+import com.leafuke.minebackup.api.v2.OperationPhase;
+import com.leafuke.minebackup.api.v2.RestoreRequest;
+import com.leafuke.minebackup.api.v2.RestoreResult;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -12,7 +10,7 @@ import java.util.function.Supplier;
 
 final class RestoreOperationHandle
         extends AbstractOperationHandle<RestoreResult>
-        implements RestoreHandle {
+        implements InternalRestoreHandle {
     private final RestoreRequest request;
     private Supplier<Duration> remaining = () -> Duration.ZERO;
     private Supplier<RestoreControlResult> confirm = () -> RestoreControlResult.NOT_PENDING;

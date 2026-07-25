@@ -1,5 +1,9 @@
 package com.leafuke.minebackup.runtime;
 
+import com.leafuke.minebackup.api.v2.FeedbackPolicy;
+import com.leafuke.minebackup.api.v2.MessageSlot;
+import com.leafuke.minebackup.api.v2.MessageTemplate;
+import com.leafuke.minebackup.api.v2.OperationPresentation;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 
@@ -31,5 +35,36 @@ final class FeedbackRouter {
         Objects.requireNonNull(current, "current");
         Objects.requireNonNull(message, "message");
         current.getPlayerList().broadcastSystemMessage(message, false);
+    }
+
+    void optional(OperationPresentation presentation, MessageSlot slot, Component defaultMessage, Object... args) {
+        if (presentation.feedbackPolicy() == FeedbackPolicy.CALLER_MANAGED) {
+            return;
+        }
+        broadcast(resolve(presentation, slot, defaultMessage, args));
+    }
+
+    void mandatory(OperationPresentation presentation, MessageSlot slot, Component defaultMessage, Object... args) {
+        broadcast(resolve(presentation, slot, defaultMessage, args));
+    }
+
+    Component resolve(
+            OperationPresentation presentation,
+            MessageSlot slot,
+            Component defaultMessage,
+            Object... args) {
+        MessageTemplate template = presentation.template(slot).orElse(null);
+        if (template == null) {
+            return defaultMessage;
+        }
+        if (template.translationKey().isBlank()) {
+            return template.literalFallback().isPresent()
+                    ? Component.literal(template.literalFallback().get())
+                    : defaultMessage;
+        }
+        return Component.translatableWithFallback(
+                template.translationKey(),
+                template.literalFallback().orElse(null),
+                args);
     }
 }

@@ -1,9 +1,11 @@
 package com.leafuke.minebackup;
 
 import com.leafuke.minebackup.command.Command;
-import com.leafuke.minebackup.api.v1.MineBackupApi;
+import com.leafuke.minebackup.api.v2.MineBackupApi;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
 import com.leafuke.minebackup.runtime.MineBackupRuntime;
+import com.leafuke.minebackup.runtime.AutoBackupUpdateResult;
+import com.leafuke.minebackup.runtime.RestoreControlResult;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.network.chat.Component;
@@ -12,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.time.Duration;
 
 public final class MineBackup implements ModInitializer {
     public static final String MOD_ID = "minebackup";
@@ -34,6 +37,22 @@ public final class MineBackup implements ModInitializer {
 
     public static MineBackupApi api() {
         return RUNTIME;
+    }
+
+    public static RestoreControlResult confirmPendingRestore() {
+        return RUNTIME.confirmPendingRestore();
+    }
+
+    public static RestoreControlResult cancelPendingRestore() {
+        return RUNTIME.cancelPendingRestore();
+    }
+
+    public static AutoBackupUpdateResult startAutomaticBackup(Duration interval) {
+        return RUNTIME.startAutomaticBackup(interval);
+    }
+
+    public static AutoBackupUpdateResult stopAutomaticBackup() {
+        return RUNTIME.stopAutomaticBackup();
     }
 
     public static void completeClientRestore(boolean success, String reason) {

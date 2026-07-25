@@ -21,6 +21,7 @@ public final class ClientRejoinController {
 
     private static State state = State.IDLE;
     private static RestoreSession.RejoinInfo rejoinInfo;
+    private static RestoreUiMessages uiMessages;
     private static int delayTicks;
     private static int elapsedTicks;
     private static int attempts;
@@ -35,7 +36,10 @@ public final class ClientRejoinController {
     private ClientRejoinController() {
     }
 
-    public static void requestRejoin(Minecraft client, RestoreSession.RejoinInfo info) {
+    public static void requestRejoin(
+            Minecraft client,
+            RestoreSession.RejoinInfo info,
+            RestoreUiMessages messages) {
         client.execute(() -> {
             if (state != State.IDLE) {
                 MineBackup.LOGGER.warn("Rejected duplicate client rejoin request.");
@@ -50,12 +54,13 @@ public final class ClientRejoinController {
             }
 
             rejoinInfo = new RestoreSession.RejoinInfo(levelId, info.reopenLan(), info.lanPort());
+            uiMessages = messages;
             delayTicks = REJOIN_DELAY_TICKS;
             elapsedTicks = 0;
             attempts = 0;
 
             if (client.level != null) {
-                Component notice = Component.translatable("minebackup.message.restore.rejoining");
+                Component notice = uiMessages.rejoining();
                 client.disconnect(new GenericMessageScreen(notice), false);
                 delayTicks = 20;
             }
@@ -118,8 +123,7 @@ public final class ClientRejoinController {
 
         attempts++;
         state = State.OPENING;
-        client.setScreen(new GenericMessageScreen(Component.translatable(
-                "minebackup.message.restore.rejoining")));
+        client.setScreen(new GenericMessageScreen(uiMessages.rejoining()));
         try {
             client.createWorldOpenFlows().openWorld(levelId, () ->
                     client.execute(() -> finishFailure(client, "cancelled")));
@@ -144,6 +148,9 @@ public final class ClientRejoinController {
             return;
         }
         RestoreSession.RejoinInfo completedInfo = rejoinInfo;
+        Component successMessage = uiMessages == null
+                ? Component.translatable("minebackup.message.restore.success_overlay")
+                : uiMessages.succeeded();
         reportResult("success", null);
         resetRejoinState();
         if (completedInfo != null) {
@@ -151,8 +158,7 @@ public final class ClientRejoinController {
         }
         MineBackup.completeClientRestore(true, null);
         if (client.player != null) {
-            client.player.sendSystemMessage(Component.translatable(
-                    "minebackup.message.restore.success_overlay"));
+            client.player.sendSystemMessage(successMessage);
         }
     }
 
@@ -195,6 +201,7 @@ public final class ClientRejoinController {
     private static void resetRejoinState() {
         state = State.IDLE;
         rejoinInfo = null;
+        uiMessages = null;
         delayTicks = 0;
         elapsedTicks = 0;
         attempts = 0;

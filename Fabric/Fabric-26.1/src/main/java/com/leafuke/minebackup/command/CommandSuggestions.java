@@ -1,6 +1,7 @@
 package com.leafuke.minebackup.command;
 
 import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 import com.mojang.brigadier.LiteralMessage;
@@ -84,15 +85,17 @@ public final class CommandSuggestions {
     }
 
     public static CompletableFuture<Suggestions> suggestCurrentBackups(SuggestionsBuilder builder) {
-        KnotLinkRequest request = KnotLinkRequest.command("LIST_BACKUPS")
-                .field("current_save", true);
-        return queryData(request).handle((data, error) -> {
+        return MineBackup.api()
+                .listCurrentBackups(BackupCatalogRequest.create("minebackup:command"))
+                .toCompletableFuture()
+                .handle((result, error) -> {
             if (error != null) {
                 MineBackup.LOGGER.debug("Unable to query current backup suggestions", error);
                 return builder.build();
             }
             String remaining = normalizeRemaining(builder.getRemaining());
-            for (String backup : splitList(data)) {
+            for (var entry : result.entries()) {
+                String backup = entry.backupId().value();
                 if (matches(backup, remaining)) {
                     builder.suggest(StringArgumentType.escapeIfRequired(backup));
                 }

@@ -1,20 +1,19 @@
 package com.leafuke.minebackup.command;
 
 import com.leafuke.minebackup.MineBackup;
-import com.leafuke.minebackup.api.v1.AutoBackupResult;
-import com.leafuke.minebackup.api.v1.BackupRequest;
-import com.leafuke.minebackup.api.v1.BackupResult;
-import com.leafuke.minebackup.api.v1.OperationFailure;
-import com.leafuke.minebackup.api.v1.OperationHandle;
-import com.leafuke.minebackup.api.v1.OperationPhase;
-import com.leafuke.minebackup.api.v1.RestoreControlResult;
-import com.leafuke.minebackup.api.v1.RestoreHandle;
-import com.leafuke.minebackup.api.v1.RestoreRequest;
-import com.leafuke.minebackup.api.v1.RestoreResult;
+import com.leafuke.minebackup.api.v2.BackupRequest;
+import com.leafuke.minebackup.api.v2.BackupResult;
+import com.leafuke.minebackup.api.v2.OperationFailure;
+import com.leafuke.minebackup.api.v2.OperationHandle;
+import com.leafuke.minebackup.api.v2.OperationPhase;
+import com.leafuke.minebackup.api.v2.RestoreRequest;
+import com.leafuke.minebackup.api.v2.RestoreResult;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 import com.leafuke.minebackup.runtime.LocalSaveCoordinator;
+import com.leafuke.minebackup.runtime.AutoBackupUpdateResult;
+import com.leafuke.minebackup.runtime.RestoreControlResult;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -172,7 +171,7 @@ public final class Command {
         RestoreRequest request = file == null || file.isBlank()
                 ? RestoreRequest.latest(callerId(source))
                 : RestoreRequest.file(callerId(source), file);
-        RestoreHandle handle = MineBackup.api().restoreCurrent(request);
+        OperationHandle<RestoreResult> handle = MineBackup.api().restoreCurrent(request);
         observeRestore(source, handle);
         return handle.phase() == OperationPhase.REJECTED ? 0 : 1;
     }
@@ -271,12 +270,7 @@ public final class Command {
     }
 
     private static int executeRestoreConfirm(CommandSourceStack source) {
-        Optional<RestoreHandle> pending = MineBackup.api().pendingRestore();
-        if (pending.isEmpty()) {
-            source.sendFailure(Component.translatable("minebackup.message.restore.countdown.not_pending"));
-            return 0;
-        }
-        RestoreControlResult result = pending.get().confirm();
+        RestoreControlResult result = MineBackup.confirmPendingRestore();
         if (result == RestoreControlResult.CONFIRMED) {
             return 1;
         }
@@ -285,12 +279,7 @@ public final class Command {
     }
 
     private static int executeRestoreStop(CommandSourceStack source) {
-        Optional<RestoreHandle> pending = MineBackup.api().pendingRestore();
-        if (pending.isEmpty()) {
-            source.sendFailure(Component.translatable("minebackup.message.restore.countdown.not_pending"));
-            return 0;
-        }
-        RestoreControlResult result = pending.get().cancel();
+        RestoreControlResult result = MineBackup.cancelPendingRestore();
         if (result == RestoreControlResult.CANCELLED) {
             return 1;
         }
@@ -299,7 +288,7 @@ public final class Command {
     }
 
     private static int executeAutoStart(CommandSourceStack source, int minutes) {
-        AutoBackupResult result = MineBackup.api().startAutomaticBackup(Duration.ofMinutes(minutes));
+        AutoBackupUpdateResult result = MineBackup.startAutomaticBackup(Duration.ofMinutes(minutes));
         if (!result.success()) {
             sendAutoFailure(source, result);
             return 0;
@@ -311,7 +300,7 @@ public final class Command {
     }
 
     private static int executeAutoStop(CommandSourceStack source) {
-        AutoBackupResult result = MineBackup.api().stopAutomaticBackup();
+        AutoBackupUpdateResult result = MineBackup.stopAutomaticBackup();
         if (!result.success()) {
             sendAutoFailure(source, result);
             return 0;
@@ -337,7 +326,9 @@ public final class Command {
         }));
     }
 
-    private static void observeRestore(CommandSourceStack source, RestoreHandle handle) {
+    private static void observeRestore(
+            CommandSourceStack source,
+            OperationHandle<RestoreResult> handle) {
         handle.completion().thenAccept(result -> source.getServer().executeIfPossible(() -> {
             if (result.outcome() == RestoreResult.Outcome.REJECTED
                     || result.outcome() == RestoreResult.Outcome.FAILED) {
@@ -346,7 +337,7 @@ public final class Command {
         }));
     }
 
-    private static void sendAutoFailure(CommandSourceStack source, AutoBackupResult result) {
+    private static void sendAutoFailure(CommandSourceStack source, AutoBackupUpdateResult result) {
         sendOperationFailure(source, result.failure());
     }
 
@@ -363,7 +354,7 @@ public final class Command {
         ServerPlayer player = source.getPlayer();
         return player == null
                 ? "minebackup:console"
-                : "minebackup:player/" + player.getGameProfile().id();
+                : "minebackup:player:" + player.getGameProfile().id();
     }
 
     private static int execute(

@@ -8,7 +8,7 @@ import java.util.Objects;
 public final class ClientHooks {
     private static final Handler NO_OP = new Handler() {
         @Override
-        public void requestRejoin(RestoreSession.RejoinInfo info) {
+        public void requestRejoin(RestoreSession.RejoinInfo info, RestoreUiMessages messages) {
         }
 
         @Override
@@ -28,8 +28,8 @@ public final class ClientHooks {
         handler = NO_OP;
     }
 
-    public static void requestRejoin(RestoreSession.RejoinInfo info) {
-        handler.requestRejoin(info);
+    public static void requestRejoin(RestoreSession.RejoinInfo info, RestoreUiMessages messages) {
+        handler.requestRejoin(info, messages);
     }
 
     public static void restoreFailed(Component message) {
@@ -37,7 +37,7 @@ public final class ClientHooks {
     }
 
     public interface Handler {
-        void requestRejoin(RestoreSession.RejoinInfo info);
+        void requestRejoin(RestoreSession.RejoinInfo info, RestoreUiMessages messages);
 
         void restoreFailed(Component message);
     }
