@@ -440,8 +440,20 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                 handle.id(),
                 handle.callerId());
         if (!handoff.accepted()) {
+            var presentation = operations.activePresentation();
+            MineBackup.LOGGER.error(
+                    "Dedicated restore sidecar handoff failed; server remains online: {}",
+                    handoff.reason());
             operations.failActiveRestore(
                     OperationFailure.Code.SIDECAR_START_FAILED,
+                    handoff.reason());
+            restoreSession.reset();
+            feedback.optional(
+                    presentation,
+                    MessageSlot.RESTORE_FAILED,
+                    Component.translatable("minebackup.message.restore.failed"),
+                    worldId,
+                    "",
                     handoff.reason());
             return;
         }
@@ -606,7 +618,12 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
 
     private void failRestore(Map<String, String> fields, String translationKey) {
         if (!restoreSession.matchesActiveWorld(fields.get("world"))) {
-            MineBackup.LOGGER.warn("Rejected restore failure event for an inactive world.");
+            if (operations.activeRestore().isEmpty()) {
+                MineBackup.LOGGER.debug(
+                        "Ignored late restore failure after the local restore operation had already ended.");
+            } else {
+                MineBackup.LOGGER.warn("Rejected restore failure event for an inactive world.");
+            }
             return;
         }
         failRestore(translationKey);

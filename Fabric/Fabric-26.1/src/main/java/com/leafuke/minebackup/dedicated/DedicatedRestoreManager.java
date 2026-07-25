@@ -3,7 +3,9 @@ package com.leafuke.minebackup.dedicated;
 import com.leafuke.minebackup.MineBackup;
 import com.leafuke.minebackup.api.v2.DedicatedRestoreStatus;
 import com.leafuke.minebackup.config.Config;
+import net.fabricmc.loader.api.FabricLoader;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 public final class DedicatedRestoreManager {
     private final DedicatedRestoreStore store;
@@ -93,7 +96,9 @@ public final class DedicatedRestoreManager {
         try {
             store.clearTransient();
             store.writeActive(session);
-            Process process = new ProcessBuilder(sidecarCommand(store.directory()))
+            List<String> command = sidecarCommand(store.directory());
+            MineBackup.LOGGER.info("Starting dedicated restore sidecar from {}", command.get(2));
+            Process process = new ProcessBuilder(command)
                     .inheritIO()
                     .start();
             long deadline = System.nanoTime()
@@ -103,8 +108,11 @@ public final class DedicatedRestoreManager {
                     return new Handoff(true, "", session, process);
                 }
                 if (!process.isAlive()) {
+                    int exitCode = process.exitValue();
                     store.clearTransient();
-                    return Handoff.failed("Dedicated restore sidecar exited before becoming ready");
+                    return Handoff.failed(
+                            "Dedicated restore sidecar exited before becoming ready (exit code "
+                                    + exitCode + ")");
                 }
                 Thread.sleep(50L);
             }
@@ -137,10 +145,49 @@ public final class DedicatedRestoreManager {
         List<String> command = new ArrayList<>();
         command.add(executable);
         command.add("-cp");
-        command.add(System.getProperty("java.class.path"));
+        command.add(sidecarClasspath());
         command.add(DedicatedRestoreSidecar.class.getName());
         command.add(restartDirectory.toString());
         return List.copyOf(command);
+    }
+
+    static String sidecarClasspath() {
+        try {
+            List<Path> origins = FabricLoader.getInstance()
+                    .getModContainer(MineBackup.MOD_ID)
+                    .map(container -> container.getOrigin().getPaths())
+                    .orElse(List.of());
+            String classpath = origins.stream()
+                    .map(path -> path.toAbsolutePath().normalize())
+                    .filter(Files::exists)
+                    .map(Path::toString)
+                    .collect(Collectors.joining(File.pathSeparator));
+            if (!classpath.isBlank()) {
+                return classpath;
+            }
+        } catch (RuntimeException exception) {
+            MineBackup.LOGGER.debug("Fabric did not expose the MineBackup mod origin", exception);
+        }
+
+        try {
+            var source = DedicatedRestoreSidecar.class
+                    .getProtectionDomain()
+                    .getCodeSource();
+            if (source != null) {
+                Path path = Path.of(source.getLocation().toURI()).toAbsolutePath().normalize();
+                if (Files.exists(path)) {
+                    return path.toString();
+                }
+            }
+        } catch (Exception exception) {
+            MineBackup.LOGGER.debug("Could not resolve the MineBackup code source", exception);
+        }
+
+        String fallback = System.getProperty("java.class.path", "").trim();
+        if (fallback.isEmpty()) {
+            throw new IllegalStateException("Unable to resolve the MineBackup sidecar classpath");
+        }
+        return fallback;
     }
 
     private static Optional<DedicatedRestoreStatus> toStatus(DedicatedRestoreSession session) {
