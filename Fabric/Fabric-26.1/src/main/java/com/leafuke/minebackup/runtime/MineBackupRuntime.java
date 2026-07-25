@@ -28,13 +28,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.LevelResource;
 
-import java.io.IOException;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
-import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
@@ -67,6 +62,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             new AutoBackupScheduler(operations, coordinator);
 
     private volatile MinecraftServer server;
+    private final FeedbackRouter feedback = new FeedbackRouter(() -> server);
     private volatile boolean operationsAvailable;
     private volatile boolean dedicatedServer;
     private volatile String lastHandshakeNoticeVersion;
@@ -106,9 +102,9 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             MineBackup.LOGGER.warn(
                     "Disabled legacy target-based automatic backup. Run /mb auto start <minutes> to configure current-world hot backup.");
             startingServer.executeIfPossible(() ->
-                    startingServer.getPlayerList().broadcastSystemMessage(
-                            Component.translatable("minebackup.message.auto.legacy_disabled"),
-                            false));
+                    feedback.broadcastOnServer(
+                            startingServer,
+                            Component.translatable("minebackup.message.auto.legacy_disabled")));
         }
     }
 
@@ -189,29 +185,29 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         }
         if (parsedAction.get() == RestoreSession.Action.RESTORE && dedicatedServer) {
             currentServer.executeIfPossible(() -> {
-                currentServer.getPlayerList().broadcastSystemMessage(
-                        Component.translatable("minebackup.message.restore.unsupported_dedicated"),
-                        false);
-                currentServer.getPlayerList().broadcastSystemMessage(MineBackup.pluginLinkMessage(), false);
+                feedback.broadcastOnServer(
+                        currentServer,
+                        Component.translatable("minebackup.message.restore.unsupported_dedicated"));
+                feedback.broadcastOnServer(currentServer, MineBackup.pluginLinkMessage());
             });
             return;
         }
         if (!VersionNumber.isAtLeast(mainVersion, MINIMUM_MAIN_VERSION)) {
-            currentServer.executeIfPossible(() -> currentServer.getPlayerList().broadcastSystemMessage(
+            currentServer.executeIfPossible(() -> feedback.broadcastOnServer(
+                    currentServer,
                     Component.translatable(
                             "minebackup.message.handshake.main_version_incompatible",
                             mainVersion == null ? "?" : mainVersion,
-                            MINIMUM_MAIN_VERSION),
-                    false));
+                            MINIMUM_MAIN_VERSION)));
             return;
         }
         if (!VersionNumber.isAtLeast(ModInfo.version(), minimumModVersion)) {
-            currentServer.executeIfPossible(() -> currentServer.getPlayerList().broadcastSystemMessage(
+            currentServer.executeIfPossible(() -> feedback.broadcastOnServer(
+                    currentServer,
                     Component.translatable(
                             "minebackup.message.handshake.version_incompatible",
                             ModInfo.version(),
-                            minimumModVersion == null ? "?" : minimumModVersion),
-                    false));
+                            minimumModVersion == null ? "?" : minimumModVersion)));
             return;
         }
         if (autoSave.isFrozen()) {
@@ -261,9 +257,9 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                 operations.failActiveBackup(
                         OperationFailure.Code.SAVE_TIMEOUT,
                         "Minecraft could not save the current world");
-                currentServer.getPlayerList().broadcastSystemMessage(
-                        Component.translatable("minebackup.broadcast.hot_backup.save_failed"),
-                        false);
+                feedback.broadcastOnServer(
+                        currentServer,
+                        Component.translatable("minebackup.broadcast.hot_backup.save_failed"));
                 return;
             }
             if (!autoSave.freeze(currentServer)) {
@@ -277,9 +273,9 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                     .whenComplete((response, error) -> {
                         if (error == null && response.isOk()) {
                             currentServer.executeIfPossible(() ->
-                                    currentServer.getPlayerList().broadcastSystemMessage(
-                                            Component.translatable("minebackup.broadcast.hot_backup.complete"),
-                                            false));
+                                    feedback.broadcastOnServer(
+                                            currentServer,
+                                            Component.translatable("minebackup.broadcast.hot_backup.complete")));
                             return;
                         }
                         if (error != null) {
@@ -298,9 +294,9 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                                     error == null
                                             ? response.displayMessage()
                                             : error.getMessage());
-                            currentServer.getPlayerList().broadcastSystemMessage(
-                                    Component.translatable("minebackup.broadcast.hot_backup.ack_failed"),
-                                    false);
+                            feedback.broadcastOnServer(
+                                    currentServer,
+                                    Component.translatable("minebackup.broadcast.hot_backup.ack_failed"));
                         });
                     });
         });
@@ -311,9 +307,9 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         if (currentServer != null) {
             currentServer.executeIfPossible(() -> {
                 if (autoSave.unfreeze()) {
-                    currentServer.getPlayerList().broadcastSystemMessage(
-                            Component.translatable("minebackup.broadcast.autosave.resumed"),
-                            false);
+                    feedback.broadcastOnServer(
+                            currentServer,
+                            Component.translatable("minebackup.broadcast.autosave.resumed"));
                 }
                 broadcastInformationalEventOnServer(currentServer, fields, event);
                 operations.handleSignal(fields);
@@ -367,18 +363,18 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             operations.failActiveRestore(
                     OperationFailure.Code.RESTORE_FAILED,
                     exception.getMessage());
-            currentServer.getPlayerList().broadcastSystemMessage(
-                    Component.translatable("minebackup.message.restore.failed"),
-                    false);
+            feedback.broadcastOnServer(
+                    currentServer,
+                    Component.translatable("minebackup.message.restore.failed"));
             return;
         }
         if (!LocalSaveCoordinator.save(currentServer)) {
             operations.failActiveRestore(
                     OperationFailure.Code.RESTORE_FAILED,
                     "Minecraft could not save the current world before restore");
-            currentServer.getPlayerList().broadcastSystemMessage(
-                    Component.translatable("minebackup.message.restore.failed"),
-                    false);
+            feedback.broadcastOnServer(
+                    currentServer,
+                    Component.translatable("minebackup.message.restore.failed"));
             return;
         }
 
@@ -390,9 +386,9 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             return;
         }
 
-        currentServer.getPlayerList().broadcastSystemMessage(
-                Component.translatable("minebackup.message.restore.preparing"),
-                false);
+        feedback.broadcastOnServer(
+                currentServer,
+                Component.translatable("minebackup.message.restore.preparing"));
         disconnectPlayers(currentServer, Component.translatable("minebackup.message.restore.kick"));
         startReleaseWatcher(currentServer);
     }
@@ -483,7 +479,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             default -> null;
         };
         if (message != null) {
-            currentServer.getPlayerList().broadcastSystemMessage(message, false);
+            feedback.broadcastOnServer(currentServer, message);
         }
     }
 
@@ -495,9 +491,9 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             }
             lastHandshakeNoticeVersion = displayVersion;
         }
-        currentServer.executeIfPossible(() -> currentServer.getPlayerList().broadcastSystemMessage(
-                Component.translatable("minebackup.message.handshake.success", displayVersion),
-                false));
+        currentServer.executeIfPossible(() -> feedback.broadcastOnServer(
+                currentServer,
+                Component.translatable("minebackup.message.handshake.success", displayVersion)));
     }
 
     private static LanState captureLanState(MinecraftServer server) {
@@ -571,53 +567,6 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             return null;
         }
         return normalized;
-    }
-
-    private static boolean readyForRestoreAck(Path root) {
-        return canAcquireSessionLock(root) && canAccessCriticalFiles(root);
-    }
-
-    private static boolean canAcquireSessionLock(Path root) {
-        Path lockPath = root.resolve("session.lock");
-        if (!Files.exists(lockPath)) {
-            return true;
-        }
-        try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.WRITE);
-             FileLock lock = channel.tryLock()) {
-            return lock != null;
-        } catch (OverlappingFileLockException exception) {
-            return false;
-        } catch (IOException exception) {
-            return false;
-        }
-    }
-
-    private static boolean canAccessCriticalFiles(Path root) {
-        if (!canOpenForWrite(root.resolve("level.dat"))
-                || !canOpenForWrite(root.resolve("level.dat_old"))) {
-            return false;
-        }
-        Path regionDirectory = root.resolve("region");
-        if (!Files.isDirectory(regionDirectory)) {
-            return true;
-        }
-        try (java.util.stream.Stream<Path> files = Files.list(regionDirectory)) {
-            Path sample = files.filter(Files::isRegularFile).findFirst().orElse(null);
-            return sample == null || canOpenForWrite(sample);
-        } catch (IOException exception) {
-            return false;
-        }
-    }
-
-    private static boolean canOpenForWrite(Path path) {
-        if (!Files.isRegularFile(path)) {
-            return true;
-        }
-        try (FileChannel ignored = FileChannel.open(path, StandardOpenOption.WRITE)) {
-            return true;
-        } catch (IOException exception) {
-            return false;
-        }
     }
 
     private static Component literalOrUnknown(String value, String unknownTranslationKey) {
@@ -731,11 +680,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     }
 
     private void broadcast(Component message) {
-        MinecraftServer currentServer = server;
-        if (currentServer != null) {
-            currentServer.executeIfPossible(() ->
-                    currentServer.getPlayerList().broadcastSystemMessage(message, false));
-        }
+        feedback.broadcast(message);
     }
 
     private static ThreadFactory daemonThreadFactory() {
@@ -788,7 +733,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                 cancel();
                 return;
             }
-            if (!serverStopped || !playersCleared || !readyForRestoreAck(worldRoot)) {
+            if (!serverStopped || !playersCleared || !WorldReleaseProbe.isReleased(worldRoot)) {
                 readyStreak.set(0);
                 return;
             }
