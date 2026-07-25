@@ -65,3 +65,34 @@ another caller's restore and cannot modify `/mb auto`.
 `RestoreResult.Outcome.RESTART_HANDOFF_ACCEPTED` is dedicated-server-only. It
 means MineBackup safely handed ownership to the sidecar; it does not mean the
 world has been restored or the new server is online.
+
+## Planned integration patterns
+
+DeathRewind can own concise feedback while scheduling ordinary API calls:
+
+```java
+BackupRequest periodic = BackupRequest.create("deathrewind:periodic")
+        .withPresentation(OperationPresentation.callerManaged());
+scheduler.scheduleAtFixedRate(
+        () -> api.backupCurrent(periodic),
+        5, 5, TimeUnit.MINUTES);
+```
+
+This does not modify the administrator's `/mb auto` schedule. The caller owns
+its timer and must avoid claiming a restore point when the result is
+`NO_CHANGES`, `BUSY`, or failed.
+
+Time Machine can populate a read-only browser without gaining access to
+arbitrary FolderRewind targets:
+
+```java
+api.listCurrentBackups(BackupCatalogRequest.create("time_machine:browser"))
+        .thenAccept(result -> {
+            if (result.outcome() == BackupCatalogResult.Outcome.SUCCESS) {
+                result.entries().forEach(entry -> render(entry.backupId()));
+            }
+        });
+```
+
+Catalog order is undefined under the current protocol. Integrations should sort
+for display and tolerate absent time, size, and comment metadata.
