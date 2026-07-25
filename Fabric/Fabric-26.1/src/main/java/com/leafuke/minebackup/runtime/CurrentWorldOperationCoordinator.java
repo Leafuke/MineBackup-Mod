@@ -1,6 +1,8 @@
 package com.leafuke.minebackup.runtime;
 
 import com.leafuke.minebackup.api.v2.BackupId;
+import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
+import com.leafuke.minebackup.api.v2.BackupCatalogResult;
 import com.leafuke.minebackup.api.v2.BackupRequest;
 import com.leafuke.minebackup.api.v2.BackupResult;
 import com.leafuke.minebackup.api.v2.OperationFailure;
@@ -23,6 +25,7 @@ import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletionStage;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
@@ -132,12 +135,6 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                         OperationFailure.Code.NO_ACTIVE_SERVER,
                         "No active Minecraft server");
             }
-            if (dedicatedServer.getAsBoolean()) {
-                return rejectedRestore(
-                        request,
-                        OperationFailure.Code.RESTART_UNAVAILABLE,
-                        "Hot restore is unavailable on a dedicated server");
-            }
             if (hasActiveOperation()) {
                 return rejectedRestore(
                         request,
@@ -191,13 +188,118 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         }
         OperationType type = active instanceof RestoreOperationHandle
                 ? OperationType.RESTORE
-                : OperationType.BACKUP;
+                : active instanceof CatalogOperationHandle
+                        ? OperationType.CATALOG
+                        : OperationType.BACKUP;
         return Optional.of(new OperationSnapshot(
                 active.id(), active.callerId(), type, active.phase()));
     }
 
     synchronized boolean isBusy() {
         return hasActiveOperation();
+    }
+
+    CompletionStage<BackupCatalogResult> listCurrentBackups(BackupCatalogRequest request) {
+        Objects.requireNonNull(request, "request");
+        CatalogOperationHandle handle;
+        synchronized (this) {
+            if (closed || !serverAvailable.getAsBoolean()) {
+                return java.util.concurrent.CompletableFuture.completedFuture(
+                        BackupCatalogResult.failed(
+                                BackupCatalogResult.Outcome.REJECTED,
+                                new OperationFailure(
+                                        OperationFailure.Code.NO_ACTIVE_SERVER,
+                                        "No active Minecraft server")));
+            }
+            if (hasActiveOperation()) {
+                return java.util.concurrent.CompletableFuture.completedFuture(
+                        BackupCatalogResult.failed(
+                                BackupCatalogResult.Outcome.BUSY,
+                                new OperationFailure(
+                                        OperationFailure.Code.BUSY,
+                                        "Another current-world operation is active")));
+            }
+            handle = new CatalogOperationHandle(
+                    UUID.randomUUID(), request.callerId(), OperationPhase.SUBMITTING);
+            active = handle;
+        }
+        knotLink.query(KnotLinkRequest.command("LIST_BACKUPS")
+                        .conversation(handle.id())
+                        .field("current_save", true))
+                .whenComplete((response, error) -> {
+                    BackupCatalogResult result;
+                    if (error != null) {
+                        result = BackupCatalogResult.failed(
+                                BackupCatalogResult.Outcome.FAILED,
+                                new OperationFailure(
+                                        OperationFailure.Code.COMMUNICATION_ERROR,
+                                        safeMessage(error.getMessage(), OperationFailure.Code.COMMUNICATION_ERROR)));
+                    } else if (!response.isOk()) {
+                        result = BackupCatalogResult.failed(
+                                BackupCatalogResult.Outcome.FAILED,
+                                new OperationFailure(
+                                        OperationFailure.Code.BACKEND_REJECTED,
+                                        response.displayMessage()));
+                    } else {
+                        try {
+                            result = BackupCatalogResult.success(
+                                    BackupCatalogParser.parseLegacy(response.data()));
+                        } catch (IllegalArgumentException exception) {
+                            result = BackupCatalogResult.failed(
+                                    BackupCatalogResult.Outcome.FAILED,
+                                    new OperationFailure(
+                                            OperationFailure.Code.PROTOCOL_ERROR,
+                                            exception.getMessage()));
+                        }
+                    }
+                    OperationPhase phase = result.outcome() == BackupCatalogResult.Outcome.SUCCESS
+                            ? OperationPhase.SUCCEEDED
+                            : OperationPhase.FAILED;
+                    if (handle.finish(phase, result)) {
+                        release(handle);
+                    }
+                });
+        return handle.completion();
+    }
+
+    InternalRestoreHandle rejectRestoreRequest(
+            RestoreRequest request,
+            OperationFailure.Code code,
+            String message) {
+        return rejectedRestore(request, code, message);
+    }
+
+    synchronized Optional<InternalRestoreHandle> activeRestore() {
+        return active instanceof InternalRestoreHandle restore
+                ? Optional.of(restore)
+                : Optional.empty();
+    }
+
+    boolean adoptRemoteRestore(UUID requestId) {
+        RestoreOperationHandle handle;
+        RestoreRequest request = RestoreRequest.latest("folderrewind:remote").immediate();
+        synchronized (this) {
+            if (closed || !serverAvailable.getAsBoolean() || hasActiveOperation()) {
+                return false;
+            }
+            handle = new RestoreOperationHandle(requestId, request, OperationPhase.RUNNING);
+            handle.bindControls(
+                    () -> Duration.ZERO,
+                    () -> RestoreControlResult.ALREADY_SUBMITTED,
+                    () -> RestoreControlResult.ALREADY_SUBMITTED);
+            active = handle;
+        }
+        return true;
+    }
+
+    void completeDedicatedHandoff() {
+        RestoreOperationHandle restore;
+        synchronized (this) {
+            restore = active instanceof RestoreOperationHandle candidate ? candidate : null;
+        }
+        if (restore != null) {
+            finishRestore(restore, RestoreResult.Outcome.RESTART_HANDOFF_ACCEPTED, null);
+        }
     }
 
     synchronized OperationPresentation activePresentation() {
@@ -610,6 +712,13 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             failBackup(backup, OperationFailure.Code.SERVER_STOPPED, message);
         } else if (current instanceof RestoreOperationHandle restore) {
             failRestore(restore, OperationFailure.Code.SERVER_STOPPED, message);
+        } else if (current instanceof CatalogOperationHandle catalog) {
+            BackupCatalogResult result = BackupCatalogResult.failed(
+                    BackupCatalogResult.Outcome.FAILED,
+                    new OperationFailure(OperationFailure.Code.SERVER_STOPPED, message));
+            if (catalog.finish(OperationPhase.FAILED, result)) {
+                release(catalog);
+            }
         }
     }
 

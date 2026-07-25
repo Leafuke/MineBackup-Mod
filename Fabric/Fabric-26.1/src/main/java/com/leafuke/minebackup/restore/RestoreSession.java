@@ -116,6 +116,10 @@ public final class RestoreSession {
                 && coordinatedWorld.equals(normalizedWorld);
     }
 
+    public synchronized Optional<String> activeWorld() {
+        return Optional.ofNullable(coordinatedWorld);
+    }
+
     public synchronized void reset() {
         phase = Phase.IDLE;
         handshake = null;

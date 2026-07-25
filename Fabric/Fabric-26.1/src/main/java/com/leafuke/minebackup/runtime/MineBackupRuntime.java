@@ -18,6 +18,7 @@ import com.leafuke.minebackup.api.v2.RuntimeStatus;
 import com.leafuke.minebackup.client.ClientHooks;
 import com.leafuke.minebackup.client.RestoreUiMessages;
 import com.leafuke.minebackup.config.Config;
+import com.leafuke.minebackup.dedicated.DedicatedRestoreManager;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.restore.RestoreSession;
@@ -46,6 +47,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.UUID;
 
 public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     private static final String MINIMUM_MAIN_VERSION = "1.14.0";
@@ -67,6 +69,8 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             new AutoSaveController(operations::failActiveBackupTimeout);
     private final AutoBackupScheduler automaticBackups =
             new AutoBackupScheduler(operations, coordinator);
+    private final DedicatedRestoreManager dedicatedRestore =
+            new DedicatedRestoreManager(Config.restartDirectory());
 
     private volatile MinecraftServer server;
     private final FeedbackRouter feedback = new FeedbackRouter(() -> server);
@@ -97,12 +101,21 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         dedicatedServer = startingServer.isDedicatedServer();
         lastHandshakeNoticeVersion = null;
         Config.load();
+        dedicatedRestore.loadLastResult();
         knotLink.startSubscriber(this::handleSignal);
         automaticBackups.serverStarted();
 
         if (dedicatedServer) {
-            MineBackup.LOGGER.info(
-                    "MineBackup 3 is running on a dedicated server. Restore commands remain disabled.");
+            DedicatedRestoreManager.Availability availability = dedicatedRestore.availability(
+                    Config.get().dedicatedRestore(),
+                    Path.of("").toAbsolutePath());
+            if (availability.available()) {
+                MineBackup.LOGGER.info("MineBackup dedicated restore sidecar is available.");
+            } else {
+                MineBackup.LOGGER.warn(
+                        "MineBackup dedicated restore is unavailable: {}",
+                        availability.reason());
+            }
         }
 
         if (Config.consumeLegacyAutoBackupMigrationNotice()) {
@@ -190,15 +203,6 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             MineBackup.LOGGER.warn("Rejected incomplete KnotLink handshake.");
             return;
         }
-        if (parsedAction.get() == RestoreSession.Action.RESTORE && dedicatedServer) {
-            currentServer.executeIfPossible(() -> {
-                feedback.broadcastOnServer(
-                        currentServer,
-                        Component.translatable("minebackup.message.restore.unsupported_dedicated"));
-                feedback.broadcastOnServer(currentServer, MineBackup.pluginLinkMessage());
-            });
-            return;
-        }
         if (!VersionNumber.isAtLeast(mainVersion, MINIMUM_MAIN_VERSION)) {
             currentServer.executeIfPossible(() -> feedback.broadcastOnServer(
                     currentServer,
@@ -220,6 +224,32 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         if (autoSave.isFrozen()) {
             MineBackup.LOGGER.warn("Rejected KnotLink handshake while a hot backup is active.");
             return;
+        }
+
+        if (parsedAction.get() == RestoreSession.Action.RESTORE && dedicatedServer) {
+            DedicatedRestoreManager.Availability availability = dedicatedRestore.availability(
+                    Config.get().dedicatedRestore(),
+                    Path.of("").toAbsolutePath());
+            if (!availability.available()) {
+                MineBackup.LOGGER.warn(
+                        "Rejected dedicated restore handshake: {}",
+                        availability.reason());
+                return;
+            }
+        }
+
+        if (parsedAction.get() == RestoreSession.Action.RESTORE
+                && operations.activeRestore().isEmpty()) {
+            UUID remoteRequestId;
+            try {
+                remoteRequestId = UUID.fromString(fields.getOrDefault("request_id", ""));
+            } catch (IllegalArgumentException exception) {
+                remoteRequestId = UUID.randomUUID();
+            }
+            if (!operations.adoptRemoteRestore(remoteRequestId)) {
+                MineBackup.LOGGER.warn("Rejected remote FolderRewind restore while another operation is active.");
+                return;
+            }
         }
 
         long generation = restoreSession.recordHandshake(
@@ -358,15 +388,85 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         }
 
         MinecraftServer currentServer = server;
-        if (currentServer == null || dedicatedServer) {
+        if (currentServer == null) {
             operations.failActiveRestore(
-                    dedicatedServer
-                            ? OperationFailure.Code.RESTART_UNAVAILABLE
-                            : OperationFailure.Code.NO_ACTIVE_SERVER,
-                    "Hot restore cannot start without an integrated server");
+                    OperationFailure.Code.NO_ACTIVE_SERVER,
+                    "Hot restore cannot start without a server");
             return;
         }
-        currentServer.executeIfPossible(() -> beginIntegratedRestore(currentServer));
+        currentServer.executeIfPossible(() -> {
+            if (dedicatedServer) {
+                beginDedicatedRestore(currentServer);
+            } else {
+                beginIntegratedRestore(currentServer);
+            }
+        });
+    }
+
+    private void beginDedicatedRestore(MinecraftServer currentServer) {
+        Config.DedicatedRestore config = Config.get().dedicatedRestore();
+        DedicatedRestoreManager.Availability availability = dedicatedRestore.availability(
+                config, Path.of("").toAbsolutePath());
+        if (!availability.available()) {
+            operations.failActiveRestore(
+                    OperationFailure.Code.RESTART_UNAVAILABLE,
+                    availability.reason());
+            return;
+        }
+        if (!LocalSaveCoordinator.save(currentServer)) {
+            operations.failActiveRestore(
+                    OperationFailure.Code.SAVE_TIMEOUT,
+                    "Minecraft could not save all worlds before dedicated restore");
+            return;
+        }
+        InternalRestoreHandle handle = operations.activeRestore().orElse(null);
+        if (handle == null) {
+            MineBackup.LOGGER.warn("Dedicated restore has no matching current-world operation.");
+            return;
+        }
+        Path worldPath = currentServer.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
+        String worldId = restoreSession.activeWorld().orElse(null);
+        if (worldId == null) {
+            operations.failActiveRestore(
+                    OperationFailure.Code.PROTOCOL_ERROR,
+                    "Dedicated restore handshake did not identify a world");
+            return;
+        }
+        DedicatedRestoreManager.Handoff handoff = dedicatedRestore.prepare(
+                config,
+                Path.of("").toAbsolutePath(),
+                worldPath,
+                worldId,
+                handle.id(),
+                handle.callerId());
+        if (!handoff.accepted()) {
+            operations.failActiveRestore(
+                    OperationFailure.Code.SIDECAR_START_FAILED,
+                    handoff.reason());
+            return;
+        }
+
+        feedback.optional(
+                operations.activePresentation(),
+                MessageSlot.RESTORE_PREPARING,
+                Component.translatable("minebackup.message.restore.preparing"),
+                worldId,
+                "");
+        Component kick = feedback.resolve(
+                operations.activePresentation(),
+                MessageSlot.RESTORE_KICK,
+                Component.translatable("minebackup.message.restore.kick"),
+                worldId,
+                "");
+        feedback.optional(
+                operations.activePresentation(),
+                MessageSlot.RESTORE_REJOIN,
+                Component.translatable("minebackup.message.restore.dedicated_handoff"),
+                worldId,
+                "");
+        disconnectPlayers(currentServer, kick);
+        operations.completeDedicatedHandoff();
+        currentServer.halt(false);
     }
 
     private void beginIntegratedRestore(MinecraftServer currentServer) {
@@ -690,6 +790,17 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
 
     @Override
     public OperationHandle<RestoreResult> restoreCurrent(RestoreRequest request) {
+        if (dedicatedServer && operationsAvailable) {
+            DedicatedRestoreManager.Availability availability = dedicatedRestore.availability(
+                    Config.get().dedicatedRestore(),
+                    Path.of("").toAbsolutePath());
+            if (!availability.available()) {
+                return operations.rejectRestoreRequest(
+                        request,
+                        OperationFailure.Code.RESTART_UNAVAILABLE,
+                        availability.reason());
+            }
+        }
         return operations.restoreCurrent(request);
     }
 
@@ -723,50 +834,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
 
     @Override
     public CompletionStage<BackupCatalogResult> listCurrentBackups(BackupCatalogRequest request) {
-        java.util.Objects.requireNonNull(request, "request");
-        if (!operationsAvailable) {
-            return CompletableFuture.completedFuture(BackupCatalogResult.failed(
-                    BackupCatalogResult.Outcome.REJECTED,
-                    new OperationFailure(
-                            OperationFailure.Code.NO_ACTIVE_SERVER,
-                            "No active Minecraft server")));
-        }
-        if (operations.isBusy()) {
-            return CompletableFuture.completedFuture(BackupCatalogResult.failed(
-                    BackupCatalogResult.Outcome.BUSY,
-                    new OperationFailure(
-                            OperationFailure.Code.BUSY,
-                            "Another current-world operation is active")));
-        }
-        return knotLink.query(KnotLinkRequest.command("LIST_BACKUPS")
-                        .conversation()
-                        .field("current_save", true))
-                .handle((response, error) -> {
-                    if (error != null) {
-                        return BackupCatalogResult.failed(
-                                BackupCatalogResult.Outcome.FAILED,
-                                new OperationFailure(
-                                        OperationFailure.Code.COMMUNICATION_ERROR,
-                                        error.getMessage()));
-                    }
-                    if (!response.isOk()) {
-                        return BackupCatalogResult.failed(
-                                BackupCatalogResult.Outcome.FAILED,
-                                new OperationFailure(
-                                        OperationFailure.Code.BACKEND_REJECTED,
-                                        response.displayMessage()));
-                    }
-                    try {
-                        return BackupCatalogResult.success(
-                                BackupCatalogParser.parseLegacy(response.data()));
-                    } catch (IllegalArgumentException exception) {
-                        return BackupCatalogResult.failed(
-                                BackupCatalogResult.Outcome.FAILED,
-                                new OperationFailure(
-                                        OperationFailure.Code.PROTOCOL_ERROR,
-                                        exception.getMessage()));
-                    }
-                });
+        return operations.listCurrentBackups(request);
     }
 
     @Override
@@ -774,14 +842,25 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         RuntimeEnvironment environment = server == null
                 ? RuntimeEnvironment.NONE
                 : dedicatedServer ? RuntimeEnvironment.DEDICATED : RuntimeEnvironment.INTEGRATED;
+        DedicatedRestoreManager.Availability availability = dedicatedServer
+                ? dedicatedRestore.availability(
+                        Config.get().dedicatedRestore(),
+                        Path.of("").toAbsolutePath())
+                : new DedicatedRestoreManager.Availability(
+                        false,
+                        "Not running on a dedicated server",
+                        new com.leafuke.minebackup.dedicated.RestartScriptResolver.Resolution(
+                                false, null, java.util.List.of(), "Not dedicated"));
         return new RuntimeStatus(
                 environment,
                 operationsAvailable,
-                false,
-                Optional.of("Dedicated restore handoff is not configured"),
+                dedicatedServer && availability.available(),
+                dedicatedServer && availability.available()
+                        ? Optional.empty()
+                        : Optional.of(availability.reason()),
                 operations.activeSnapshot(),
                 automaticBackups.state(),
-                Optional.empty());
+                dedicatedRestore.lastStatus());
     }
 
     private CurrentWorldOperationCoordinator.CountdownListener countdownListener() {

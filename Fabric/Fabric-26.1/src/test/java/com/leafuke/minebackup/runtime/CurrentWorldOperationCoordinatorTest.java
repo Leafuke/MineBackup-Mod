@@ -2,6 +2,8 @@ package com.leafuke.minebackup.runtime;
 
 import com.leafuke.minebackup.api.v2.BackupRequest;
 import com.leafuke.minebackup.api.v2.BackupResult;
+import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
+import com.leafuke.minebackup.api.v2.BackupCatalogResult;
 import com.leafuke.minebackup.api.v2.OperationFailure;
 import com.leafuke.minebackup.api.v2.OperationPhase;
 import com.leafuke.minebackup.api.v2.RestoreExecutionPolicy;
@@ -17,6 +19,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -191,18 +194,16 @@ class CurrentWorldOperationCoordinatorTest {
     }
 
     @Test
-    void dedicatedServerRejectsHotRestore() throws Exception {
+    void dedicatedServerUsesSameCoordinatedRestoreSubmission() {
         dedicated.set(true);
         CurrentWorldOperationCoordinator coordinator = coordinator();
 
         InternalRestoreHandle handle = coordinator.restoreCurrent(RestoreRequest.latest("test"));
-        RestoreResult result = handle.completion().toCompletableFuture().get(1, TimeUnit.SECONDS);
 
-        assertEquals(RestoreResult.Outcome.REJECTED, result.outcome());
-        assertEquals(
-                OperationFailure.Code.RESTART_UNAVAILABLE,
-                result.failure().orElseThrow().code());
+        assertEquals(OperationPhase.COUNTING_DOWN, handle.phase());
         assertTrue(gateway.requests.isEmpty());
+        assertEquals(RestoreControlResult.CONFIRMED, handle.confirm());
+        assertEquals(1, gateway.requests.size());
     }
 
     @Test
@@ -244,6 +245,43 @@ class CurrentWorldOperationCoordinatorTest {
                         .code());
         var next = coordinator.backupCurrent(BackupRequest.create("second"));
         assertEquals(OperationPhase.RUNNING, next.phase());
+    }
+
+    @Test
+    void catalogUsesCurrentWorldGate() throws Exception {
+        CurrentWorldOperationCoordinator coordinator = coordinator();
+        var backup = coordinator.backupCurrent(BackupRequest.create("first"));
+        BackupCatalogResult busy = coordinator
+                .listCurrentBackups(BackupCatalogRequest.create("time_machine:ui"))
+                .toCompletableFuture()
+                .get(1, TimeUnit.SECONDS);
+        assertEquals(BackupCatalogResult.Outcome.BUSY, busy.outcome());
+
+        coordinator.failActiveBackupTimeout();
+        BackupCatalogResult success = coordinator
+                .listCurrentBackups(BackupCatalogRequest.create("time_machine:ui"))
+                .toCompletableFuture()
+                .get(1, TimeUnit.SECONDS);
+        assertEquals(BackupCatalogResult.Outcome.SUCCESS, success.outcome());
+        assertTrue(success.entries().isEmpty());
+    }
+
+    @Test
+    void remoteRestoreIsAdoptedAndDedicatedHandoffCompletesBeforeShutdown() throws Exception {
+        CurrentWorldOperationCoordinator coordinator = coordinator();
+        UUID requestId = UUID.randomUUID();
+
+        assertTrue(coordinator.adoptRemoteRestore(requestId));
+        assertEquals("folderrewind:remote", coordinator.activeSnapshot().orElseThrow().callerId());
+        assertFalse(coordinator.adoptRemoteRestore(UUID.randomUUID()));
+
+        InternalRestoreHandle restore = coordinator.activeRestore().orElseThrow();
+        coordinator.completeDedicatedHandoff();
+        RestoreResult result =
+                restore.completion().toCompletableFuture().get(1, TimeUnit.SECONDS);
+        assertEquals(RestoreResult.Outcome.RESTART_HANDOFF_ACCEPTED, result.outcome());
+        coordinator.serverStopping(false);
+        assertEquals(RestoreResult.Outcome.RESTART_HANDOFF_ACCEPTED, result.outcome());
     }
 
     @Test

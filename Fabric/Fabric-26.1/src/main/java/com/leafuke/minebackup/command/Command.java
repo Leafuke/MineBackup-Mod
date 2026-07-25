@@ -164,9 +164,6 @@ public final class Command {
     }
 
     private static int executeRestoreCurrent(CommandSourceStack source, String file) {
-        if (rejectDedicatedRestore(source)) {
-            return 0;
-        }
         warnAboutVoxy(source);
         RestoreRequest request = file == null || file.isBlank()
                 ? RestoreRequest.latest(callerId(source))
@@ -410,7 +407,6 @@ public final class Command {
             return false;
         }
         source.sendFailure(Component.translatable("minebackup.message.restore.unsupported_dedicated"));
-        source.sendSuccess(MineBackup::pluginLinkMessage, false);
         return true;
     }
 

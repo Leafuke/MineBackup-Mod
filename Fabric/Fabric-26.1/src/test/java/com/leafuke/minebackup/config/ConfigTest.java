@@ -3,6 +3,9 @@ package com.leafuke.minebackup.config;
 import org.junit.jupiter.api.Test;
 
 import java.util.Properties;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -10,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigTest {
+    @TempDir
+    Path root;
     @Test
     void restoreCountdownUsesDefaultAndClampsNumericValues() {
         Config.Snapshot defaults = Config.fromProperties(new Properties());
@@ -57,5 +62,36 @@ class ConfigTest {
         assertFalse(canonical.containsKey("auto.configId"));
         assertFalse(canonical.containsKey("auto.folder"));
         assertFalse(canonical.containsKey("auto.intervalMinutes"));
+    }
+
+    @Test
+    void dedicatedRestoreDefaultsAndParsesTimeouts() {
+        Config.DedicatedRestore defaults = Config.fromProperties(new Properties()).dedicatedRestore();
+        assertEquals(Config.DedicatedRestoreMode.SIDECAR, defaults.mode());
+        assertEquals(5, defaults.sidecarStartTimeoutSeconds());
+        assertEquals(8, defaults.worldReleaseTimeoutSeconds());
+        assertEquals(3600, defaults.operationTimeoutSeconds());
+
+        Properties values = new Properties();
+        values.setProperty("dedicatedRestore.mode", "disabled");
+        values.setProperty("dedicatedRestore.restartScript", " run.cmd ");
+        values.setProperty("dedicatedRestore.operationTimeoutSeconds", "120");
+        Config.DedicatedRestore parsed = Config.fromProperties(values).dedicatedRestore();
+        assertEquals(Config.DedicatedRestoreMode.DISABLED, parsed.mode());
+        assertEquals("run.cmd", parsed.restartScript());
+        assertEquals(120, parsed.operationTimeoutSeconds());
+    }
+
+    @Test
+    void migratesLegacyFileOnlyWhenCanonicalDoesNotExist() throws Exception {
+        Path target = root.resolve("minebackup.properties");
+        Path legacy = root.resolve("minebackup-auto.properties");
+        Files.writeString(legacy, "restore.countdownSeconds=5");
+        assertTrue(Config.migrateLegacyConfig(target));
+        assertTrue(Files.isRegularFile(target));
+        assertFalse(Files.exists(legacy));
+        Files.writeString(legacy, "restore.countdownSeconds=7");
+        assertFalse(Config.migrateLegacyConfig(target));
+        assertTrue(Files.exists(legacy));
     }
 }

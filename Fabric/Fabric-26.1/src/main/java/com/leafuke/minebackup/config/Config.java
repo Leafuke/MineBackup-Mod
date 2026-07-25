@@ -16,7 +16,8 @@ import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class Config {
-    private static final String CONFIG_FILE = "minebackup-auto.properties";
+    private static final String CONFIG_FILE = "minebackup.properties";
+    private static final String LEGACY_CONFIG_FILE = "minebackup-auto.properties";
 
     private static final boolean HOST_REOPEN_ENABLED_DEFAULT = true;
     private static final int HOST_REOPEN_RETRY_COUNT_DEFAULT = 6;
@@ -28,6 +29,9 @@ public final class Config {
     private static final int CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT = 1800;
     private static final boolean UPDATE_CHECK_ENABLED_DEFAULT = true;
     private static final int RESTORE_COUNTDOWN_SECONDS_DEFAULT = 10;
+    private static final int SIDECAR_START_TIMEOUT_SECONDS_DEFAULT = 5;
+    private static final int WORLD_RELEASE_TIMEOUT_SECONDS_DEFAULT = 8;
+    private static final int OPERATION_TIMEOUT_SECONDS_DEFAULT = 3600;
     public static final int MAX_RESTORE_COUNTDOWN_SECONDS = 300;
     public static final int MAX_AUTO_BACKUP_INTERVAL_MINUTES = 525_600;
 
@@ -39,6 +43,9 @@ public final class Config {
 
     public static synchronized Snapshot load() {
         Path configPath = configPath();
+        if (migrateLegacyConfig(configPath)) {
+            MineBackup.LOGGER.info("Migrated {} to {}", LEGACY_CONFIG_FILE, CONFIG_FILE);
+        }
         if (!Files.exists(configPath)) {
             Snapshot defaults = defaults();
             CURRENT.set(defaults);
@@ -150,7 +157,31 @@ public final class Config {
         boolean updateCheckEnabled = parseBoolean(
                 first(properties, "updateCheck.enabled", "enableUpdateCheck"),
                 UPDATE_CHECK_ENABLED_DEFAULT);
-        return new Snapshot(autoBackup, restore, hostReopen, clientReconnect, updateCheckEnabled);
+        DedicatedRestore dedicatedRestore = new DedicatedRestore(
+                DedicatedRestoreMode.parse(properties.getProperty("dedicatedRestore.mode")),
+                properties.getProperty("dedicatedRestore.restartScript", "").trim(),
+                parseInt(
+                        properties.getProperty("dedicatedRestore.sidecarStartTimeoutSeconds"),
+                        SIDECAR_START_TIMEOUT_SECONDS_DEFAULT,
+                        1,
+                        60),
+                parseInt(
+                        properties.getProperty("dedicatedRestore.worldReleaseTimeoutSeconds"),
+                        WORLD_RELEASE_TIMEOUT_SECONDS_DEFAULT,
+                        1,
+                        120),
+                parseInt(
+                        properties.getProperty("dedicatedRestore.operationTimeoutSeconds"),
+                        OPERATION_TIMEOUT_SECONDS_DEFAULT,
+                        30,
+                        86_400));
+        return new Snapshot(
+                autoBackup,
+                restore,
+                hostReopen,
+                clientReconnect,
+                dedicatedRestore,
+                updateCheckEnabled);
     }
 
     static Properties toProperties(Snapshot snapshot) {
@@ -178,6 +209,18 @@ public final class Config {
         properties.setProperty("lan.clientReconnect.retryIntervalTicks", String.valueOf(client.retryIntervalTicks()));
         properties.setProperty("lan.clientReconnect.maxDurationTicks", String.valueOf(client.maxDurationTicks()));
         properties.setProperty("updateCheck.enabled", String.valueOf(snapshot.updateCheckEnabled()));
+        DedicatedRestore dedicated = snapshot.dedicatedRestore();
+        properties.setProperty("dedicatedRestore.mode", dedicated.mode().name());
+        properties.setProperty("dedicatedRestore.restartScript", dedicated.restartScript());
+        properties.setProperty(
+                "dedicatedRestore.sidecarStartTimeoutSeconds",
+                String.valueOf(dedicated.sidecarStartTimeoutSeconds()));
+        properties.setProperty(
+                "dedicatedRestore.worldReleaseTimeoutSeconds",
+                String.valueOf(dedicated.worldReleaseTimeoutSeconds()));
+        properties.setProperty(
+                "dedicatedRestore.operationTimeoutSeconds",
+                String.valueOf(dedicated.operationTimeoutSeconds()));
         return properties;
     }
 
@@ -225,6 +268,27 @@ public final class Config {
         return FabricLoader.getInstance().getConfigDir().resolve(CONFIG_FILE);
     }
 
+    public static Path restartDirectory() {
+        return FabricLoader.getInstance().getConfigDir().resolve("minebackup").resolve("restart");
+    }
+
+    static boolean migrateLegacyConfig(Path target) {
+        Path legacy = target.resolveSibling(LEGACY_CONFIG_FILE);
+        if (Files.exists(target) || !Files.isRegularFile(legacy)) {
+            return false;
+        }
+        try {
+            try {
+                Files.move(legacy, target, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException exception) {
+                Files.move(legacy, target);
+            }
+            return true;
+        } catch (IOException exception) {
+            return false;
+        }
+    }
+
     private static Snapshot defaults() {
         return new Snapshot(
                 null,
@@ -239,6 +303,12 @@ public final class Config {
                         CLIENT_RECONNECT_INITIAL_DELAY_TICKS_DEFAULT,
                         CLIENT_RECONNECT_RETRY_INTERVAL_TICKS_DEFAULT,
                         CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT),
+                new DedicatedRestore(
+                        DedicatedRestoreMode.SIDECAR,
+                        "",
+                        SIDECAR_START_TIMEOUT_SECONDS_DEFAULT,
+                        WORLD_RELEASE_TIMEOUT_SECONDS_DEFAULT,
+                        OPERATION_TIMEOUT_SECONDS_DEFAULT),
                 UPDATE_CHECK_ENABLED_DEFAULT);
     }
 
@@ -274,15 +344,23 @@ public final class Config {
             Restore restore,
             HostReopen hostReopen,
             ClientReconnect clientReconnect,
+            DedicatedRestore dedicatedRestore,
             boolean updateCheckEnabled) {
         public Snapshot {
             Objects.requireNonNull(restore, "restore");
             Objects.requireNonNull(hostReopen, "hostReopen");
             Objects.requireNonNull(clientReconnect, "clientReconnect");
+            Objects.requireNonNull(dedicatedRestore, "dedicatedRestore");
         }
 
         public Snapshot withAutoBackup(AutoBackup value) {
-            return new Snapshot(value, restore, hostReopen, clientReconnect, updateCheckEnabled);
+            return new Snapshot(
+                    value,
+                    restore,
+                    hostReopen,
+                    clientReconnect,
+                    dedicatedRestore,
+                    updateCheckEnabled);
         }
     }
 
@@ -314,5 +392,38 @@ public final class Config {
             int initialDelayTicks,
             int retryIntervalTicks,
             int maxDurationTicks) {
+    }
+
+    public enum DedicatedRestoreMode {
+        SIDECAR,
+        DISABLED;
+
+        static DedicatedRestoreMode parse(String value) {
+            if (value == null || value.isBlank()) {
+                return SIDECAR;
+            }
+            try {
+                return valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                return SIDECAR;
+            }
+        }
+    }
+
+    public record DedicatedRestore(
+            DedicatedRestoreMode mode,
+            String restartScript,
+            int sidecarStartTimeoutSeconds,
+            int worldReleaseTimeoutSeconds,
+            int operationTimeoutSeconds) {
+        public DedicatedRestore {
+            Objects.requireNonNull(mode, "mode");
+            restartScript = restartScript == null ? "" : restartScript.trim();
+            if (sidecarStartTimeoutSeconds < 1
+                    || worldReleaseTimeoutSeconds < 1
+                    || operationTimeoutSeconds < 30) {
+                throw new IllegalArgumentException("Dedicated restore timeouts are invalid");
+            }
+        }
     }
 }
