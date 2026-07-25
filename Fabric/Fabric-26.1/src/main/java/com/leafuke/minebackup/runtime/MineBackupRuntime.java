@@ -787,10 +787,10 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         restoreSession.reset();
         automaticBackups.close();
         operations.close();
-        MinecraftServer currentServer = server;
-        if (currentServer != null) {
-            currentServer.executeIfPossible(autoSave::unfreeze);
-        }
+        // close() can run from SERVER_STOPPING, after Minecraft has rejected
+        // all new server-thread tasks. Restoring the noSave flags is a local,
+        // synchronous cleanup and must never enqueue work during shutdown.
+        autoSave.unfreeze();
         knotLink.close();
         coordinator.shutdownNow();
     }
