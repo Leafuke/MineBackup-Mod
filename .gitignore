@@ -33,6 +33,7 @@ replay_*.log
 *.7z
 *.jar
 *.bat
+*.txt
 
 # Keep the maintained Gradle wrappers in version control
 !/Fabric/Fabric-1.21/gradlew.bat
@@ -51,13 +52,6 @@ replay_*.log
 # External references and local downloads
 /Reference/
 /References/
-/Documentation-main (1).zip
-/fabric-docs-main (1).zip
-/Neoforge/NeoForge-1.21/TEMPLATE_LICENSE.txt
-/Forge/Forge-1.20/CREDITS.txt
-/Forge/Forge-1.20/README.txt
-/Forge/Forge-1.20/changelog.txt
-
 # Unmanaged version trees
 /Fabric/Fabric-1.18/
 /Fabric/Fabric-1.19/
@@ -65,7 +59,12 @@ replay_*.log
 /Fabric/Fabric-1.20.x/
 /Fabric/Fabric-1.21.x/
 /Forge/forge-1.12.2/
-/Forge/forge-1.12.2-14.23.5.2859-mdk/
 /Forge/forge-1.16.5/
 /Forge/forge-1.18.2/
 /Forge/forge-1.20.1/
+
+# 其他项目仓库
+/JustEnoughAccidents/
+/Death-Rewind/
+/DeathRewind/
+/MineBackupPlugin/
