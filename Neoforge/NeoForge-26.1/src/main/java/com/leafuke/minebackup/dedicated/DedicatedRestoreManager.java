@@ -3,7 +3,7 @@ package com.leafuke.minebackup.dedicated;
 import com.leafuke.minebackup.MineBackup;
 import com.leafuke.minebackup.api.v2.DedicatedRestoreStatus;
 import com.leafuke.minebackup.config.Config;
-import net.fabricmc.loader.api.FabricLoader;
+import net.neoforged.fml.ModList;
 
 import java.io.File;
 import java.io.IOException;
@@ -152,23 +152,7 @@ public final class DedicatedRestoreManager {
     }
 
     static String sidecarClasspath() {
-        try {
-            List<Path> origins = FabricLoader.getInstance()
-                    .getModContainer(MineBackup.MOD_ID)
-                    .map(container -> container.getOrigin().getPaths())
-                    .orElse(List.of());
-            String classpath = origins.stream()
-                    .map(path -> path.toAbsolutePath().normalize())
-                    .filter(Files::exists)
-                    .map(Path::toString)
-                    .collect(Collectors.joining(File.pathSeparator));
-            if (!classpath.isBlank()) {
-                return classpath;
-            }
-        } catch (RuntimeException exception) {
-            MineBackup.LOGGER.debug("Fabric did not expose the MineBackup mod origin", exception);
-        }
-
+        // For NeoForge, use the code source location directly
         try {
             var source = DedicatedRestoreSidecar.class
                     .getProtectionDomain()

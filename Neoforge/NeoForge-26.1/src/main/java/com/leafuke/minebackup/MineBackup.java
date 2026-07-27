@@ -2,12 +2,14 @@ package com.leafuke.minebackup;
 
 import com.leafuke.minebackup.command.Command;
 import com.leafuke.minebackup.api.v2.MineBackupApi;
+import com.leafuke.minebackup.client.MineBackupClient;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
 import com.leafuke.minebackup.runtime.MineBackupRuntime;
 import com.leafuke.minebackup.runtime.AutoBackupUpdateResult;
 import com.leafuke.minebackup.runtime.RestoreControlResult;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
@@ -26,12 +28,12 @@ public final class MineBackup {
 
     private static final MineBackupRuntime RUNTIME = new MineBackupRuntime();
 
-    public MineBackup(IEventBus modEventBus) {
+    public MineBackup(IEventBus modEventBus, Dist dist) {
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
         RUNTIME.registerEvents();
 
         // Initialize client on client dist
-        if (net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) {
+        if (dist.isClient()) {
             MineBackupClient.initialize();
         }
 
