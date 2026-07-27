@@ -28,6 +28,7 @@ jobs:
             "Fabric/Fabric-1.21/gradle.properties"
             "Fabric/Fabric-1.21.11/gradle.properties"
             "Fabric/Fabric-26.1/gradle.properties"
+            "Fabric/Fabric-26.2/gradle.properties"
             "Neoforge/NeoForge-1.21/gradle.properties"
             "Neoforge/NeoForge-26.1/gradle.properties"
             "Forge/Forge-1.20/gradle.properties"
@@ -83,6 +84,11 @@ jobs:
             minecraft: 26.1
             java: '25'
             project_dir: Fabric/Fabric-26.1
+          - id: fabric-26.2
+            loader: fabric
+            minecraft: 26.2
+            java: '25'
+            project_dir: Fabric/Fabric-26.2
           - id: neoforge-1.21
             loader: neoforge
             minecraft: 1.21
