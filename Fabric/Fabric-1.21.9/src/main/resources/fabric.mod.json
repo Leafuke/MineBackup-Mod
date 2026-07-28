@@ -19,7 +19,7 @@
 			"com.leafuke.minebackup.MineBackup"
 		],
 		"client": [
-			"com.leafuke.minebackup.MineBackupClient"
+			"com.leafuke.minebackup.client.MineBackupClient"
 		]
 	},
 	"depends": {
@@ -27,8 +27,5 @@
 		"minecraft": "~1.21.9",
 		"java": ">=21",
 		"fabric-api": "*"
-	},
-	"suggests": {
-		"another-mod": "*"
 	}
 }

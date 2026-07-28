@@ -14,21 +14,18 @@
 	"license": "MIT",
 	"icon": "assets/minebackup/icon.png",
 	"environment": "*",
-    "entrypoints": {
-      "main": [
-        "com.leafuke.minebackup.MineBackup"
-      ],
-      "client": [
-        "com.leafuke.minebackup.MineBackupClient"
-      ]
-    },
+	"entrypoints": {
+		"main": [
+			"com.leafuke.minebackup.MineBackup"
+		],
+		"client": [
+			"com.leafuke.minebackup.client.MineBackupClient"
+		]
+	},
 	"depends": {
 		"fabricloader": ">=0.17.3",
 		"minecraft": ">=1.21 <1.21.11",
 		"java": ">=21",
 		"fabric-api": "*"
-	},
-	"suggests": {
-		"another-mod": "*"
 	}
 }
