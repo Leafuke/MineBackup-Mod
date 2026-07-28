@@ -38,6 +38,8 @@ replay_*.log
 # Keep the maintained Gradle wrappers in version control
 !/Fabric/Fabric-1.21/gradlew.bat
 !/Fabric/Fabric-1.21/gradle/wrapper/gradle-wrapper.jar
+!/Fabric/Fabric-1.21.9/gradlew.bat
+!/Fabric/Fabric-1.21.9/gradle/wrapper/gradle-wrapper.jar
 !/Fabric/Fabric-1.21.11/gradlew.bat
 !/Fabric/Fabric-1.21.11/gradle/wrapper/gradle-wrapper.jar
 !/Fabric/Fabric-26.1/gradlew.bat
