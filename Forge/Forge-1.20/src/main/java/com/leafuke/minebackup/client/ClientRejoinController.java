@@ -5,7 +5,7 @@ import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.restore.RestoreSession;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
+import net.minecraft.client.gui.screens.GenericDirtMessageScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
 import net.minecraft.client.server.IntegratedServer;
@@ -61,7 +61,9 @@ public final class ClientRejoinController {
 
             if (client.level != null) {
                 Component notice = uiMessages.rejoining();
-                client.disconnect(new GenericMessageScreen(notice), false);
+                // 1.20 has no Minecraft#disconnect(Screen, boolean); mirror PauseScreen#onDisconnect.
+                client.level.disconnect();
+                client.clearLevel(new GenericDirtMessageScreen(notice));
                 delayTicks = 20;
             }
         });
@@ -74,7 +76,7 @@ public final class ClientRejoinController {
             if (client.player != null) {
                 client.player.sendSystemMessage(message);
             } else {
-                client.setScreen(new GenericMessageScreen(message));
+                client.setScreen(new GenericDirtMessageScreen(message));
             }
         });
     }
@@ -123,10 +125,12 @@ public final class ClientRejoinController {
 
         attempts++;
         state = State.OPENING;
-        client.setScreen(new GenericMessageScreen(uiMessages.rejoining()));
+        client.setScreen(new GenericDirtMessageScreen(uiMessages.rejoining()));
         try {
-            client.createWorldOpenFlows().openWorld(levelId, () ->
-                    client.execute(() -> finishFailure(client, "cancelled")));
+            // 1.20 exposes loadLevel(Screen, String): the screen argument is the fallback shown when
+            // the load is aborted, so there is no cancel callback to hook. A cancelled load leaves
+            // the state machine in OPENING and is reported by the REJOIN_DEADLINE_TICKS timeout.
+            client.createWorldOpenFlows().loadLevel(new SelectWorldScreen(new TitleScreen()), levelId);
         } catch (RuntimeException exception) {
             MineBackup.LOGGER.warn(
                     "Synchronous world rejoin attempt {}/{} failed",
@@ -280,7 +284,8 @@ public final class ClientRejoinController {
     private static boolean publishLan(IntegratedServer server, int port) {
         try {
             GameType gameType = server.getDefaultGameType();
-            boolean allowCommands = server.getPlayerList().isAllowCommandsForAllPlayers();
+            // 1.20 name; renamed to isAllowCommandsForAllPlayers in later versions.
+            boolean allowCommands = server.getPlayerList().isAllowCheatsForAllPlayers();
             return server.publishServer(gameType, allowCommands, port);
         } catch (RuntimeException exception) {
             MineBackup.LOGGER.warn("Failed to reopen LAN after restore", exception);

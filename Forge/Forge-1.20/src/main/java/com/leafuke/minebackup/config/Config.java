@@ -322,7 +322,8 @@ public final class Config {
             return fallback;
         }
         try {
-            return Math.clamp(Integer.parseInt(value.trim()), minimum, maximum);
+            // Math.clamp is Java 21+; 1.20 targets Java 17.
+            return Math.max(minimum, Math.min(maximum, Integer.parseInt(value.trim())));
         } catch (NumberFormatException exception) {
             return fallback;
         }

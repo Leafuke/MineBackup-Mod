@@ -144,7 +144,8 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
 
             seconds = request.executionPolicy() == RestoreExecutionPolicy.IMMEDIATE
                     ? 0
-                    : Math.clamp(configuredCountdownSeconds.getAsInt(), 0, 300);
+                    // Math.clamp is Java 21+; 1.20 targets Java 17.
+                    : Math.max(0, Math.min(300, configuredCountdownSeconds.getAsInt()));
             OperationPhase initial = seconds == 0
                     ? OperationPhase.SUBMITTING
                     : OperationPhase.COUNTING_DOWN;

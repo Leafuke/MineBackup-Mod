@@ -109,10 +109,12 @@ public final class LanAutoReconnectController {
         }
         try {
             ServerAddress address = ServerAddress.parseString(lastLanAddress);
-            ServerData target = new ServerData(lastLanServer.name, lastLanAddress, ServerData.Type.LAN);
+            // 1.20 predates ServerData.Type; the third argument is the boolean `lan` flag.
+            ServerData target = new ServerData(lastLanServer.name, lastLanAddress, true);
             target.copyFrom(lastLanServer);
             MineBackup.LOGGER.info("LAN reconnect attempt {} to {}", attempts + 1, lastLanAddress);
-            ConnectScreen.startConnecting(client.screen, client, address, target, false, null);
+            // 1.20 has no transfer-state parameter on startConnecting.
+            ConnectScreen.startConnecting(client.screen, client, address, target, false);
             return true;
         } catch (RuntimeException exception) {
             MineBackup.LOGGER.warn("Failed to start LAN reconnect", exception);

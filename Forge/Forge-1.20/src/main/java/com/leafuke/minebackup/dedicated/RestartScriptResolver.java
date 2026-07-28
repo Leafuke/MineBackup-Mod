@@ -54,7 +54,8 @@ public final class RestartScriptResolver {
                                 ? "No restart script candidate was found"
                                 : "Multiple restart script candidates were found; configure one explicitly");
             }
-            script = found.getFirst();
+            // List#getFirst is Java 21+; 1.20 targets Java 17.
+            script = found.get(0);
         }
 
         String lowerName = script.getFileName().toString().toLowerCase(Locale.ROOT);
