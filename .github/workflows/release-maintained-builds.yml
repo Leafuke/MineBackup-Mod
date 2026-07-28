@@ -26,7 +26,7 @@ jobs:
 
           files=(
             "Fabric/Fabric-1.21/gradle.properties"
-            "Fabric/Fabric-1.21.11/gradle.properties"
+            "Fabric/Fabric-1.21.9/gradle.properties"
             "Fabric/Fabric-26.1/gradle.properties"
             "Fabric/Fabric-26.2/gradle.properties"
             "Neoforge/NeoForge-1.21/gradle.properties"
@@ -74,11 +74,11 @@ jobs:
             minecraft: 1.21
             java: '21'
             project_dir: Fabric/Fabric-1.21
-          - id: fabric-1.21.11
+          - id: fabric-1.21.9
             loader: fabric
-            minecraft: 1.21.11
+            minecraft: 1.21.9
             java: '21'
-            project_dir: Fabric/Fabric-1.21.11
+            project_dir: Fabric/Fabric-1.21.9
           - id: fabric-26.1
             loader: fabric
             minecraft: 26.1
