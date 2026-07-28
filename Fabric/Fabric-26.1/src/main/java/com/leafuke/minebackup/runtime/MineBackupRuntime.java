@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.UUID;
 
 public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
-    private static final String MINIMUM_MAIN_VERSION = "1.14.0";
+    private static final String MINIMUM_MAIN_VERSION = "1.16.0";
     private static final long RELEASE_TIMEOUT_NANOS = Duration.ofSeconds(8).toNanos();
     private static final int READY_STREAK_REQUIRED = 3;
 
