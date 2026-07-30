@@ -125,19 +125,26 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
     }
 
     InternalRestoreHandle restoreCurrent(RestoreRequest request) {
+        return restoreCurrent(request, UUID.randomUUID());
+    }
+
+    InternalRestoreHandle restoreCurrent(RestoreRequest request, UUID requestId) {
         Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(requestId, "requestId");
         RestoreOperationHandle handle;
         int seconds;
         synchronized (this) {
             if (closed || !serverAvailable.getAsBoolean()) {
                 return rejectedRestore(
                         request,
+                        requestId,
                         OperationFailure.Code.NO_ACTIVE_SERVER,
                         "No active Minecraft server");
             }
             if (hasActiveOperation()) {
                 return rejectedRestore(
                         request,
+                        requestId,
                         OperationFailure.Code.BUSY,
                         "Another current-world operation is active");
             }
@@ -148,7 +155,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             OperationPhase initial = seconds == 0
                     ? OperationPhase.SUBMITTING
                     : OperationPhase.COUNTING_DOWN;
-            handle = new RestoreOperationHandle(UUID.randomUUID(), request, initial);
+            handle = new RestoreOperationHandle(requestId, request, initial);
             handle.bindControls(
                     () -> remaining(handle),
                     () -> confirm(handle),
@@ -685,12 +692,21 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         return handle;
     }
 
+    InternalRestoreHandle rejectRestoreRequest(
+            RestoreRequest request,
+            UUID requestId,
+            OperationFailure.Code code,
+            String message) {
+        return rejectedRestore(request, requestId, code, message);
+    }
+
     private RestoreOperationHandle rejectedRestore(
             RestoreRequest request,
+            UUID requestId,
             OperationFailure.Code code,
             String message) {
         RestoreOperationHandle handle = new RestoreOperationHandle(
-                UUID.randomUUID(),
+                requestId,
                 request,
                 OperationPhase.SUBMITTING);
         handle.bindControls(

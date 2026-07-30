@@ -1,6 +1,9 @@
 package com.leafuke.minebackup.command;
 
 import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
+import com.leafuke.minebackup.api.v2.BackupCatalogResult;
+import com.leafuke.minebackup.api.v2.BackupEntry;
 import com.leafuke.minebackup.api.v2.BackupRequest;
 import com.leafuke.minebackup.api.v2.BackupResult;
 import com.leafuke.minebackup.api.v2.OperationFailure;
@@ -20,14 +23,18 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.command.CommandManager;
+import net.minecraft.text.ClickEvent;
+import net.minecraft.text.HoverEvent;
 import net.minecraft.text.Text;
 import net.minecraft.text.MutableText;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.WorldSavePath;
 
 import java.nio.file.Files;
 import java.time.Duration;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -125,6 +132,13 @@ public final class Command {
                                         context.getSource(),
                                         StringArgumentType.getString(context, "config_id")))))
                 .then(CommandManager.literal("backups")
+                        .executes(context -> executeListCurrentBackups(context.getSource(), 1))
+                        .then(CommandManager.literal("current")
+                                .executes(context -> executeListCurrentBackups(context.getSource(), 1))
+                                .then(CommandManager.argument("page", IntegerArgumentType.integer(1))
+                                        .executes(context -> executeListCurrentBackups(
+                                                context.getSource(),
+                                                IntegerArgumentType.getInteger(context, "page")))))
                         .then(CommandManager.argument("config_id", StringArgumentType.word())
                                 .suggests((context, builder) -> CommandSuggestions.suggestConfigIds(builder))
                                 .then(CommandManager.argument("folder", StringArgumentType.string())
@@ -263,6 +277,119 @@ public final class Command {
             }
             source.sendFeedback(() -> result, false);
         });
+    }
+
+    private static int executeListCurrentBackups(ServerCommandSource source, int page) {
+        MineBackup.api()
+                .listCurrentBackups(BackupCatalogRequest.create(callerId(source)))
+                .whenComplete((result, error) ->
+                        source.getServer().execute(() -> {
+                            if (error != null) {
+                                MineBackup.LOGGER.warn("Unable to list current-world backups", error);
+                                source.sendError(
+                                        Text.translatable("minebackup.message.communication_failed"));
+                                return;
+                            }
+                            if (result.outcome() != BackupCatalogResult.Outcome.SUCCESS) {
+                                sendOperationFailure(source, result.failure());
+                                return;
+                            }
+                            MutableText message =
+                                    buildCurrentBackupList(result.entries(), page);
+                            source.sendFeedback(() -> message, false);
+                        }));
+        return 1;
+    }
+
+    private static MutableText buildCurrentBackupList(
+            List<BackupEntry> entries,
+            int requestedPage) {
+        CurrentBackupListModel.Page page = CurrentBackupListModel.create(
+                entries,
+                requestedPage,
+                ZoneId.systemDefault());
+        MutableText result = Text.translatable(
+                "minebackup.message.list_current_backups.title",
+                page.currentPage(),
+                page.totalPages(),
+                page.totalEntries());
+
+        if (page.rows().isEmpty()) {
+            result.append(Text.translatable("minebackup.message.list.empty"));
+        } else {
+            for (CurrentBackupListModel.Row row : page.rows()) {
+                result.append(Text.literal("\n §7- "));
+                result.append(currentBackupLabel(row));
+                result.append(Text.literal(" "));
+                result.append(currentRestoreButton(row));
+            }
+        }
+
+        result.append(Text.literal("\n "));
+        result.append(pageLink(
+                "minebackup.message.list_current_backups.previous",
+                page.currentPage() - 1,
+                page.hasPrevious()));
+        result.append(Text.translatable(
+                "minebackup.message.list_current_backups.page",
+                page.currentPage(),
+                page.totalPages()));
+        result.append(pageLink(
+                "minebackup.message.list_current_backups.next",
+                page.currentPage() + 1,
+                page.hasNext()));
+        return result;
+    }
+
+    private static MutableText currentBackupLabel(CurrentBackupListModel.Row row) {
+        MutableText label;
+        if (row.timestamp().isEmpty()) {
+            label = Text.translatable(
+                    "minebackup.message.list_current_backups.legacy",
+                    row.fileName());
+        } else if (row.comment().isPresent()) {
+            label = Text.translatable(
+                    "minebackup.message.list_current_backups.entry",
+                    row.timestamp().get(),
+                    row.comment().get());
+        } else {
+            label = Text.translatable(
+                    "minebackup.message.list_current_backups.entry_no_comment",
+                    row.timestamp().get());
+        }
+        return label.styled(style -> style.withHoverEvent(new HoverEvent(
+                HoverEvent.Action.SHOW_TEXT,
+                Text.translatable(
+                        "minebackup.message.list_current_backups.file_hover",
+                        row.fileName()))));
+    }
+
+    private static MutableText currentRestoreButton(CurrentBackupListModel.Row row) {
+        return Text.translatable("minebackup.message.list_current_backups.restore")
+                .styled(style -> style
+                        .withColor(Formatting.GREEN)
+                        .withUnderline(true)
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, row.restoreCommand()))
+                        .withHoverEvent(new HoverEvent(
+                                HoverEvent.Action.SHOW_TEXT,
+                                Text.translatable(
+                                        "minebackup.message.list_current_backups.restore_hover",
+                                        row.fileName()))));
+    }
+
+    private static MutableText pageLink(String translationKey, int targetPage, boolean enabled) {
+        MutableText link = Text.translatable(translationKey);
+        if (!enabled) {
+            return link.styled(style -> style.withColor(Formatting.DARK_GRAY));
+        }
+        String command = "/mb list backups current " + targetPage;
+        return link.styled(style -> style
+                .withColor(Formatting.AQUA)
+                .withUnderline(true)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
+                .withHoverEvent(new HoverEvent(
+                        HoverEvent.Action.SHOW_TEXT,
+                        Text.translatable(translationKey))));
     }
 
     private static int executeRestoreConfirm(ServerCommandSource source) {
