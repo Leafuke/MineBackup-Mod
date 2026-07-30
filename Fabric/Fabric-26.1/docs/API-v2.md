@@ -98,3 +98,17 @@ api.listCurrentBackups(BackupCatalogRequest.create("time_machine:browser"))
 
 Catalog order is undefined under the current protocol. Integrations should sort
 for display and tolerate absent time, size, and comment metadata.
+
+## FolderRewind UI restore signal
+
+FolderRewind can ask the mod to begin the existing current-world restore flow by
+broadcasting `event=hot_restore_requested`. The optional `file` field selects a
+safe archive file name; an absent or blank value selects the latest backup. The
+optional `request_id` must be a UUID and is reused as the RESTORE conversation
+ID; MineBackup generates one when the field is absent.
+
+Accepted requests use caller ID `folderrewind:ui` and the configured restore
+countdown. Integrated servers use the normal save, unload, restore, and rejoin
+flow. Dedicated servers additionally require an available restart sidecar.
+Malformed, busy, unavailable, or unsupported requests are rejected without
+submitting RESTORE.

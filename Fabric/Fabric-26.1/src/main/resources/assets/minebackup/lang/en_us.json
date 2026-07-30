@@ -56,6 +56,7 @@
   "minebackup.message.restore.failed_status": "§c[MineBackup] The backend reported restore failure. Auto rejoin was cancelled.",
   "minebackup.message.restore.release_timeout": "§c[MineBackup] Timed out while releasing world files. Restore was cancelled.",
   "minebackup.message.restore.ack_failed": "§c[MineBackup] The backend rejected the world-release acknowledgement. Restore was cancelled.",
+  "minebackup.message.restore.remote_request_rejected": "§c[MineBackup] Rejected a FolderRewind hot restore request: §f%s",
   "minebackup.message.restore.unsupported_dedicated": "§6[MineBackup] /mb target restore is unavailable on dedicated servers; use /mb restore for the current world.",
   "minebackup.message.restore.dedicated_handoff": "§6[MineBackup] Restore ownership was handed to the restart sidecar. The server is stopping safely.",
   "minebackup.message.restore.countdown.started": "§6[MineBackup] Hot restore will run in §f%s §6seconds.",

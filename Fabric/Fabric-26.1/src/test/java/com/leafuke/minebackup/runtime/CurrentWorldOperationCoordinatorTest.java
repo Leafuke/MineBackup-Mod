@@ -166,6 +166,23 @@ class CurrentWorldOperationCoordinatorTest {
     }
 
     @Test
+    void suppliedRestoreIdBecomesOperationAndConversationId() throws Exception {
+        CurrentWorldOperationCoordinator coordinator = coordinator();
+        UUID requestId = UUID.randomUUID();
+
+        InternalRestoreHandle handle = coordinator.restoreCurrent(
+                RestoreRequest.file("folderrewind:ui", "snapshot.7z"),
+                requestId);
+        handle.confirm();
+
+        assertEquals(requestId, handle.id());
+        Map<String, String> fields =
+                KnotLinkCodec.parse(gateway.requests.getFirst().serialize());
+        assertEquals(requestId.toString(), fields.get("request_id"));
+        assertEquals("snapshot.7z", fields.get("file"));
+    }
+
+    @Test
     void configuredCountdownExpiresAndSubmits() throws Exception {
         countdownSeconds.set(1);
         CurrentWorldOperationCoordinator coordinator = coordinator();
