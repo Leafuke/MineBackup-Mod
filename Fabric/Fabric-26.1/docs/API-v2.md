@@ -54,7 +54,9 @@ Stable slot arguments are:
 
 `listCurrentBackups` participates in the current-world operation gate and
 returns `BUSY` during backup or restore. The current FolderRewind protocol
-provides only archive names, so metadata is empty and order is undefined.
+provides only archive names. MineBackup best-effort parses standard FolderRewind
+file names to populate `createdAt` and `comment`; integrations must tolerate
+absent metadata for legacy or unrecognized names. Catalog order is undefined.
 Unsafe backend names fail the entire result with `PROTOCOL_ERROR`.
 
 `runtimeStatus()` reports the environment, current operation, read-only

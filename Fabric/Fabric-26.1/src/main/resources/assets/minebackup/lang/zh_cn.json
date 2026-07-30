@@ -19,6 +19,16 @@
   "minebackup.message.list_folders.entry": "\n §7- §f%s §7| §f%s",
   "minebackup.message.list_backups.title": "§a配置与文件夹 §b%s §7/ §b%s §a中的备份",
   "minebackup.message.list_backups.entry": "\n §7- §f%s",
+  "minebackup.message.list_current_backups.title": "§a当前世界备份 §7（第 §f%s§7/§f%s §7页，共 §f%s §7个）",
+  "minebackup.message.list_current_backups.entry": "§b%s §7| §f%s",
+  "minebackup.message.list_current_backups.entry_no_comment": "§b%s §7| §8无注释",
+  "minebackup.message.list_current_backups.legacy": "§f%s",
+  "minebackup.message.list_current_backups.file_hover": "§7完整文件名：§f%s",
+  "minebackup.message.list_current_backups.restore": "[还原]",
+  "minebackup.message.list_current_backups.restore_hover": "§6从此备份还原当前世界\n§f%s",
+  "minebackup.message.list_current_backups.previous": "[上一页]",
+  "minebackup.message.list_current_backups.page": " §7第 §f%s§7/§f%s §7页 ",
+  "minebackup.message.list_current_backups.next": "[下一页]",
   "minebackup.message.list.empty": "\n§7（无结果）",
 
   "minebackup.message.unknown_world": "未知世界",
@@ -86,7 +96,7 @@
   "minebackup.help.summary.restore_target": "还原指定的非当前目标",
   "minebackup.help.summary.list_configs": "列出备份配置",
   "minebackup.help.summary.list_folders": "列出配置中的文件夹",
-  "minebackup.help.summary.list_backups": "列出文件夹中的备份",
+  "minebackup.help.summary.list_backups": "列出当前世界或指定文件夹中的备份",
   "minebackup.help.summary.auto_start": "定时执行当前世界热备份",
   "minebackup.help.summary.auto_stop": "停止并清除当前世界自动备份计划"
 }
