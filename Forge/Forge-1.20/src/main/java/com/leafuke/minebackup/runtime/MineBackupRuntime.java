@@ -11,6 +11,7 @@ import com.leafuke.minebackup.api.v2.MineBackupApi;
 import com.leafuke.minebackup.api.v2.MessageSlot;
 import com.leafuke.minebackup.api.v2.OperationFailure;
 import com.leafuke.minebackup.api.v2.OperationHandle;
+import com.leafuke.minebackup.api.v2.OperationPhase;
 import com.leafuke.minebackup.api.v2.RestoreRequest;
 import com.leafuke.minebackup.api.v2.RestoreResult;
 import com.leafuke.minebackup.api.v2.RuntimeEnvironment;
@@ -859,6 +860,12 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
 
     @Override
     public OperationHandle<RestoreResult> restoreCurrent(RestoreRequest request) {
+        return restoreCurrent(request, UUID.randomUUID());
+    }
+
+    private OperationHandle<RestoreResult> restoreCurrent(
+            RestoreRequest request,
+            UUID requestId) {
         if (dedicatedServer && operationsAvailable) {
             DedicatedRestoreManager.Availability availability = dedicatedRestore.availability(
                     Config.get().dedicatedRestore(),
@@ -866,11 +873,12 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             if (!availability.available()) {
                 return operations.rejectRestoreRequest(
                         request,
+                        requestId,
                         OperationFailure.Code.RESTART_UNAVAILABLE,
                         availability.reason());
             }
         }
-        return operations.restoreCurrent(request);
+        return operations.restoreCurrent(request, requestId);
     }
 
     public Optional<InternalRestoreHandle> pendingRestore() {

@@ -30,7 +30,7 @@ final class CurrentBackupListModel {
                 .reversed());
 
         int totalPages = Math.max(1, (sorted.size() + PAGE_SIZE - 1) / PAGE_SIZE);
-        int currentPage = Math.clamp(requestedPage, 1, totalPages);
+        int currentPage = Math.max(1, Math.min(totalPages, requestedPage));
         int fromIndex = Math.min((currentPage - 1) * PAGE_SIZE, sorted.size());
         int toIndex = Math.min(fromIndex + PAGE_SIZE, sorted.size());
         List<Row> rows = sorted.subList(fromIndex, toIndex).stream()

@@ -273,7 +273,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             RestoreRequest request,
             OperationFailure.Code code,
             String message) {
-        return rejectedRestore(request, code, message);
+        return rejectedRestore(request, UUID.randomUUID(), code, message);
     }
 
     synchronized Optional<InternalRestoreHandle> activeRestore() {

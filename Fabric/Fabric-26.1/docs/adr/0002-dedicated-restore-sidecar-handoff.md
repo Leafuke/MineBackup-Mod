@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for MineBackup 3.1.0 / API v2.
+Accepted for MineBackup 3.2.0 / API v2.
 
 ## Context
 

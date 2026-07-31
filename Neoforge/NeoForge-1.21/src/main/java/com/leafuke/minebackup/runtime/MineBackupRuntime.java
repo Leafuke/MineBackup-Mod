@@ -11,6 +11,7 @@ import com.leafuke.minebackup.api.v2.MineBackupApi;
 import com.leafuke.minebackup.api.v2.MessageSlot;
 import com.leafuke.minebackup.api.v2.OperationFailure;
 import com.leafuke.minebackup.api.v2.OperationHandle;
+import com.leafuke.minebackup.api.v2.OperationPhase;
 import com.leafuke.minebackup.api.v2.RestoreRequest;
 import com.leafuke.minebackup.api.v2.RestoreResult;
 import com.leafuke.minebackup.api.v2.RuntimeEnvironment;

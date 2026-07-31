@@ -9,7 +9,7 @@
 - Fabric 26.1 源码基线：仓库提交 `702498c` 时的
   `Fabric/Fabric-26.1/src/main`。
 - Fabric 26.2 初始适配提交：`a6e4eec`。
-- 两个版本的 MineBackup 模组版本均为 `3.1.0`。
+- 两个版本的 MineBackup 模组版本均为 `3.2.0`。
 - Fabric 26.1 的 API、ADR、专用服务端恢复文档和 JUnit 测试继续作为主源，
   不复制到 Fabric 26.2。
 - Fabric 26.2 不维护 `src/test`；每次同步至少执行完整 Gradle 构建和本文末尾的
@@ -122,5 +122,5 @@ Fabric 26.2 使用官方新模板的 `rootProject.name = 'minebackup'`，不需�
 根目录的 `release-maintained-builds.yml` 已包含 Fabric 26.2，产物名为
 `minebackup-fabric-26.2-<版本>.jar`。该工作流沿用仓库既有规则：所有维护项目
 的 `mod_version` 必须完全一致。当前其他加载器仍为 2.1.x，而 Fabric 26.1/26.2
-为 3.1.0，因此在其他维护项目完成版本同步前，统一发布预检会主动终止；这不是
+为 3.2.0，因此在其他维护项目完成版本同步前，统一发布预检会主动终止；这不是
 Fabric 26.2 构建失败。
