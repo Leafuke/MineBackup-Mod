@@ -30,7 +30,6 @@ import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.level.storage.LevelResource;
 
 import java.nio.file.Files;
@@ -548,7 +547,7 @@ public final class Command {
             return false;
         }
         if (server.isDedicatedServer()) {
-            return source.permissions().hasPermission(Permissions.COMMANDS_MODERATOR);
+            return source.hasPermission(2);
         }
         ServerPlayer player = source.getPlayer();
         if (player == null) {
