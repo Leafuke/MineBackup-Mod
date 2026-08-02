@@ -22,6 +22,10 @@ If you run a Spigot/Paper server instead, use [MineBackupPlugin](https://modrint
 
 For Windows users, we recommend [FolderRewind](https://apps.microsoft.com/detail/9nwsdgxdqws4) with the [MineRewind](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases) plugin rather than the standalone MineBackup desktop app.
 
+### **📚 FolderRewind Minecraft Documentation**
+
+The [Minecraft integration overview](https://folderrewind.top/en/docs/guides/minecraft/overview) explains how this mod fits with [MineBackupPlugin](https://folderrewind.top/en/docs/guides/minecraft/minebackup-plugin), [Death Rewind](https://folderrewind.top/en/docs/guides/minecraft/death-rewind), and [Just Enough Accidents](https://folderrewind.top/en/docs/guides/minecraft/just-enough-accidents). The [MineBackup-Mod guide](https://folderrewind.top/en/docs/guides/minecraft/minebackup-mod) covers the current commands and dedicated-server Sidecar flow.
+
 <a href="https://apps.microsoft.com/detail/9nwsdgxdqws4?referrer=appbadge&mode=direct">
 	<img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200"/>
 </a>
@@ -47,7 +51,8 @@ This lightweight mod is a bridge between the **MineBackup desktop application** 
 | Loader | Minecraft Versions | Mappings |
 | :--- | :--- | :--- |
 | Fabric | 1.21 – 1.21.8 | Yarn |
-| Fabric | 1.21.9 – 1.21.11 | Mojang (official) |
+| Fabric | 1.21.9 – 1.21.10 | Mojang (official) |
+| Fabric | 1.21.11 | Mojang (official) |
 | Fabric | 26.1 – 26.1.2 | Mojang (unobfuscated) |
 | Fabric | 26.2 | Mojang (unobfuscated) |
 | NeoForge | 1.21 – 1.21.8 | Parchment |

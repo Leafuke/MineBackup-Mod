@@ -20,6 +20,10 @@
 
 对于 Windows 端用户，推荐使用 [FolderRewind](https://apps.microsoft.com/detail/9nwsdgxdqws4) + [MineRewind 插件](https://github.com/Leafuke/FolderRewind-Plugin-Minecraft/releases) 组合来实现同样的功能，FolderRewind 是 MineBackup 桌面应用的精神续作。
 
+### **📚 FolderRewind Minecraft 文档**
+
+请先阅读 [Minecraft 联动生态总览](https://folderrewind.top/docs/guides/minecraft/overview)，其中介绍了本模组与 [MineBackupPlugin](https://folderrewind.top/docs/guides/minecraft/minebackup-plugin)、[Death Rewind](https://folderrewind.top/docs/guides/minecraft/death-rewind)、[Just Enough Accidents](https://folderrewind.top/docs/guides/minecraft/just-enough-accidents) 的关系；[MineBackup-Mod 说明](https://folderrewind.top/docs/guides/minecraft/minebackup-mod) 介绍当前指令和专用服务端 Sidecar 流程。
+
 <a href="https://apps.microsoft.com/detail/9nwsdgxdqws4?referrer=appbadge&mode=direct">
 	<img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200"/>
 </a>
@@ -55,7 +59,8 @@
 | 加载器 | Minecraft 版本 | 映射方式 |
 | :--- | :--- | :--- |
 | Fabric | 1.21 | Yarn |
-| Fabric | 1.21.9 ~ 1.21.11 | Mojang |
+| Fabric | 1.21.9 ~ 1.21.10 | Mojang |
+| Fabric | 1.21.11 | Mojang |
 | Fabric | 26.1 ~ 26.1.2 | 官方（无混淆） |
 | Fabric | 26.2 | 官方（无混淆） |
 | NeoForge | 1.21 | Parchment |
