@@ -171,7 +171,6 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         switch (event) {
             case "handshake" -> handleHandshake(fields);
             case "pre_hot_backup" -> handlePreHotBackup(fields);
-            case "hot_restore_requested" -> handleHotRestoreRequested(fields);
             case "pre_hot_restore" -> handlePreHotRestore(fields);
             case "restore_finished" -> handleRestoreFinished(fields);
             case "restore_cancelled" -> failRestore(
@@ -347,45 +346,6 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                         });
                     });
         });
-    }
-
-    private void handleHotRestoreRequested(Map<String, String> fields) {
-        RemoteRestoreRequest remoteRequest;
-        try {
-            remoteRequest = RemoteRestoreRequest.parse(fields);
-        } catch (IllegalArgumentException exception) {
-            rejectRemoteRestoreRequest(exception.getMessage());
-            return;
-        }
-
-        OperationHandle<RestoreResult> handle =
-                restoreCurrent(remoteRequest.request(), remoteRequest.requestId());
-        if (handle.phase() != OperationPhase.REJECTED) {
-            String backup = remoteRequest.request().backupId()
-                    .map(id -> id.value())
-                    .orElse("<latest>");
-            MineBackup.LOGGER.info(
-                    "Accepted FolderRewind UI hot restore request {} for {}.",
-                    remoteRequest.requestId(),
-                    backup);
-            return;
-        }
-
-        handle.completion().thenAccept(result -> rejectRemoteRestoreRequest(
-                result.failure()
-                        .map(OperationFailure::message)
-                        .filter(message -> !message.isBlank())
-                        .orElse("Hot restore request was rejected")));
-    }
-
-    private void rejectRemoteRestoreRequest(String reason) {
-        String safeReason = reason == null || reason.isBlank()
-                ? "Invalid hot restore request"
-                : reason;
-        MineBackup.LOGGER.warn("Rejected FolderRewind UI hot restore request: {}", safeReason);
-        feedback.broadcast(Component.translatable(
-                "minebackup.message.restore.remote_request_rejected",
-                safeReason));
     }
 
     private void handleBackupTerminal(Map<String, String> fields, String event) {
@@ -847,12 +807,6 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
 
     @Override
     public OperationHandle<RestoreResult> restoreCurrent(RestoreRequest request) {
-        return restoreCurrent(request, UUID.randomUUID());
-    }
-
-    private OperationHandle<RestoreResult> restoreCurrent(
-            RestoreRequest request,
-            UUID requestId) {
         if (dedicatedServer && operationsAvailable) {
             DedicatedRestoreManager.Availability availability = dedicatedRestore.availability(
                     Config.get().dedicatedRestore(),
@@ -860,12 +814,11 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             if (!availability.available()) {
                 return operations.rejectRestoreRequest(
                         request,
-                        requestId,
                         OperationFailure.Code.RESTART_UNAVAILABLE,
                         availability.reason());
             }
         }
-        return operations.restoreCurrent(request, requestId);
+        return operations.restoreCurrent(request);
     }
 
     public Optional<InternalRestoreHandle> pendingRestore() {

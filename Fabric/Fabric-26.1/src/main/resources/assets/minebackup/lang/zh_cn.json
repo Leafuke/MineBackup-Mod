@@ -56,7 +56,6 @@
   "minebackup.message.restore.failed_status": "§c[MineBackup] 主程序报告还原失败，已取消自动重进。",
   "minebackup.message.restore.release_timeout": "§c[MineBackup] 释放世界文件超时，已取消还原。",
   "minebackup.message.restore.ack_failed": "§c[MineBackup] 主程序拒绝世界释放确认，已取消还原。",
-  "minebackup.message.restore.remote_request_rejected": "§c[MineBackup] 已拒绝来自 FolderRewind 的热还原请求：§f%s",
   "minebackup.message.restore.unsupported_dedicated": "§6[MineBackup] 专用服务器不能使用 /mb target restore；请用 /mb restore 还原当前世界。",
   "minebackup.message.restore.dedicated_handoff": "§6[MineBackup] 已将还原交接给重启 sidecar，服务器即将安全停止。",
   "minebackup.message.restore.countdown.started": "§6[MineBackup] 热还原将在 §f%s §6秒后执行。",
