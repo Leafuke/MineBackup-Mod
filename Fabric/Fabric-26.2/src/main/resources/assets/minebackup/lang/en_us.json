@@ -19,6 +19,16 @@
   "minebackup.message.list_folders.entry": "\n §7- §f%s §7| §f%s",
   "minebackup.message.list_backups.title": "§aBackups in §b%s §7/ §b%s",
   "minebackup.message.list_backups.entry": "\n §7- §f%s",
+  "minebackup.message.list_current_backups.title": "§aCurrent-world backups §7(page §f%s§7/§f%s§7, §f%s §7total)",
+  "minebackup.message.list_current_backups.entry": "§b%s §7| §f%s",
+  "minebackup.message.list_current_backups.entry_no_comment": "§b%s §7| §8No comment",
+  "minebackup.message.list_current_backups.legacy": "§f%s",
+  "minebackup.message.list_current_backups.file_hover": "§7Full file name: §f%s",
+  "minebackup.message.list_current_backups.restore": "[Restore]",
+  "minebackup.message.list_current_backups.restore_hover": "§6Restore the current world from this backup\n§f%s",
+  "minebackup.message.list_current_backups.previous": "[Previous]",
+  "minebackup.message.list_current_backups.page": " §7Page §f%s§7/§f%s ",
+  "minebackup.message.list_current_backups.next": "[Next]",
   "minebackup.message.list.empty": "\n§7(No results)",
 
   "minebackup.message.unknown_world": "Unknown world",
@@ -86,7 +96,7 @@
   "minebackup.help.summary.restore_target": "Restore a selected non-current target",
   "minebackup.help.summary.list_configs": "List backup configs",
   "minebackup.help.summary.list_folders": "List folders in a config",
-  "minebackup.help.summary.list_backups": "List backups for a folder",
+  "minebackup.help.summary.list_backups": "List backups for the current world or a selected folder",
   "minebackup.help.summary.auto_start": "Schedule current-world hot backups",
   "minebackup.help.summary.auto_stop": "Stop and clear the current-world automatic backup schedule"
 }
