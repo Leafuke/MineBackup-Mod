@@ -58,12 +58,12 @@
 
 | 加载器 | Minecraft 版本 | 映射方式 |
 | :--- | :--- | :--- |
-| Fabric | 1.21 | Yarn |
+| Fabric | 1.21 ~ 1.21.8 | Yarn |
 | Fabric | 1.21.9 ~ 1.21.10 | Mojang |
 | Fabric | 1.21.11 | Mojang |
 | Fabric | 26.1 ~ 26.1.2 | 官方（无混淆） |
 | Fabric | 26.2 | 官方（无混淆） |
-| NeoForge | 1.21 | Parchment |
+| NeoForge | 1.21 ~ 1.21.8 | Parchment |
 | NeoForge | 26.1 ~ 26.1.2 | 官方（无混淆） |
 | Forge | 1.20 ~ 1.20.4 | 官方 |
 

@@ -72,7 +72,7 @@ public final class ClientRejoinController {
             resetRejoinState();
             resetLanReopenState();
             if (client.player != null) {
-                client.player.sendMessage(message);
+                sendClientMessage(client, message);
             } else {
                 client.setScreen(new MessageScreen(message));
             }
@@ -157,9 +157,7 @@ public final class ClientRejoinController {
             scheduleLanReopen(completedInfo);
         }
         MineBackup.completeClientRestore(true, null);
-        if (client.player != null) {
-            client.player.sendMessage(successMessage);
-        }
+        sendClientMessage(client, successMessage);
     }
 
     private static void finishFailure(MinecraftClient client, String reason) {
@@ -294,8 +292,13 @@ public final class ClientRejoinController {
     }
 
     private static void sendClientMessage(MinecraftClient client, Text message) {
-        if (client.player != null) {
-            client.player.sendMessage(message);
+        if (client.player == null) {
+            return;
+        }
+        try {
+            client.player.sendMessage(message, false);
+        } catch (RuntimeException | LinkageError exception) {
+            MineBackup.LOGGER.warn("Failed to display client restore message", exception);
         }
     }
 

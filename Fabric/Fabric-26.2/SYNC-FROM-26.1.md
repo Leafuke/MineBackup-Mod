@@ -121,6 +121,5 @@ Fabric 26.2 使用官方新模板的 `rootProject.name = 'minebackup'`，不需�
 
 根目录的 `release-maintained-builds.yml` 已包含 Fabric 26.2，产物名为
 `minebackup-fabric-26.2-<版本>.jar`。该工作流沿用仓库既有规则：所有维护项目
-的 `mod_version` 必须完全一致。当前其他加载器仍为 2.1.x，而 Fabric 26.1/26.2
-为 3.2.0，因此在其他维护项目完成版本同步前，统一发布预检会主动终止；这不是
-Fabric 26.2 构建失败。
+的 `mod_version` 必须完全一致。当前八个维护项目已统一为 3.2.1，统一发布预检
+会据此解析发布标签和所有维护项目的产物版本；单个项目构建失败仍会独立阻止发布。
