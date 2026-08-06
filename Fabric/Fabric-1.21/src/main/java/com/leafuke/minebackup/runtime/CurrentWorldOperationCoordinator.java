@@ -1,5 +1,6 @@
 package com.leafuke.minebackup.runtime;
 
+import com.leafuke.minebackup.MineBackup;
 import com.leafuke.minebackup.api.v2.BackupId;
 import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
 import com.leafuke.minebackup.api.v2.BackupCatalogResult;
@@ -167,7 +168,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         }
 
         if (seconds > 0) {
-            countdownListener.onStarted(handle, seconds);
+            notifyCountdown("started", () -> countdownListener.onStarted(handle, seconds));
         } else {
             submitRestore(handle);
         }
@@ -416,7 +417,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             }
             cancelCountdownLocked();
         }
-        countdownListener.onSubmitted(handle);
+        notifyCountdown("submitted", () -> countdownListener.onSubmitted(handle));
 
         KnotLinkRequest command = KnotLinkRequest.command("RESTORE")
                 .conversation(handle.id())
@@ -453,7 +454,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         if (expired) {
             submitRestore(handle);
         } else {
-            countdownListener.onTick(handle, remaining);
+            notifyCountdown("tick", () -> countdownListener.onTick(handle, remaining));
         }
     }
 
@@ -466,7 +467,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                 return RestoreControlResult.ALREADY_SUBMITTED;
             }
         }
-        countdownListener.onConfirmed(handle);
+        notifyCountdown("confirmed", () -> countdownListener.onConfirmed(handle));
         submitRestore(handle);
         return RestoreControlResult.CONFIRMED;
     }
@@ -491,7 +492,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             }
         }
         if (cancelled) {
-            countdownListener.onCancelled(handle);
+            notifyCountdown("cancelled", () -> countdownListener.onCancelled(handle));
             return RestoreControlResult.CANCELLED;
         }
         return RestoreControlResult.NOT_PENDING;
@@ -509,6 +510,17 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
     private int remainingSecondsLocked() {
         long remainingNanos = Math.max(0L, restoreDeadlineNanos - nanoTime.getAsLong());
         return (int) Math.ceil(remainingNanos / 1_000_000_000.0);
+    }
+
+    private static void notifyCountdown(String phase, Runnable notification) {
+        try {
+            notification.run();
+        } catch (RuntimeException | LinkageError exception) {
+            MineBackup.LOGGER.warn(
+                    "Failed to deliver restore countdown {} notification; continuing operation.",
+                    phase,
+                    exception);
+        }
     }
 
     private void handleBackupSignal(

@@ -17,6 +17,7 @@ import com.leafuke.minebackup.api.v2.RuntimeEnvironment;
 import com.leafuke.minebackup.api.v2.RuntimeStatus;
 import com.leafuke.minebackup.client.ClientHooks;
 import com.leafuke.minebackup.client.RestoreUiMessages;
+import com.leafuke.minebackup.compat.TextEvents;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.dedicated.DedicatedRestoreManager;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
@@ -935,11 +936,17 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     }
 
     private static MutableText actionLink(String translationKey, String command) {
-        return Text.translatable(translationKey).styled(style -> style
-                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
-                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, 
-                        Text.translatable(translationKey)))
-                .withUnderline(true));
+        ClickEvent clickEvent = TextEvents.runCommand(command);
+        HoverEvent hoverEvent = TextEvents.showText(Text.translatable(translationKey));
+        return Text.translatable(translationKey).styled(style -> {
+            if (clickEvent != null) {
+                style = style.withClickEvent(clickEvent);
+            }
+            if (hoverEvent != null) {
+                style = style.withHoverEvent(hoverEvent);
+            }
+            return style.withUnderline(true);
+        });
     }
 
     private void broadcast(Text message) {

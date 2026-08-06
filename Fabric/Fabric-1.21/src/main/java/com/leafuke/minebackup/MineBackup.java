@@ -2,6 +2,7 @@ package com.leafuke.minebackup;
 
 import com.leafuke.minebackup.command.Command;
 import com.leafuke.minebackup.api.v2.MineBackupApi;
+import com.leafuke.minebackup.compat.TextEvents;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
 import com.leafuke.minebackup.runtime.MineBackupRuntime;
 import com.leafuke.minebackup.runtime.AutoBackupUpdateResult;
@@ -9,8 +10,6 @@ import com.leafuke.minebackup.runtime.RestoreControlResult;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.text.Text;
-import net.minecraft.text.HoverEvent;
-import net.minecraft.text.ClickEvent;
 import net.minecraft.text.MutableText;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,9 +67,8 @@ public final class MineBackup implements ModInitializer {
     public static MutableText pluginLinkMessage() {
         return Text.translatable("minebackup.message.plugin_link_prefix")
                 .append(Text.literal(PLUGIN_GUIDE_URL).styled(style -> style
-                        .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL,
-                                PLUGIN_GUIDE_URL))
-                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        .withClickEvent(TextEvents.openUrl(URI.create(PLUGIN_GUIDE_URL)))
+                        .withHoverEvent(TextEvents.showText(
                                 Text.translatable("minebackup.message.plugin_link_hover")))
                         .withUnderline(true)));
     }
