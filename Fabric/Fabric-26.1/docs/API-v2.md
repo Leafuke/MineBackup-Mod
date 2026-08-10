@@ -64,6 +64,25 @@ automatic-backup schedule, dedicated restore availability, and the last
 persisted dedicated handoff result. API consumers cannot confirm or cancel
 another caller's restore and cannot modify `/mb auto`.
 
+`currentWorldAutomation()` is the complete read-only automation view. It
+returns `CurrentWorldAutomationState`, including current-world availability,
+the optional display name, `CurrentWorldAutomationMode` (`OFF`, `BACKUP`, or
+`REMIND`), the interval, and the next trigger time. The method has a default
+implementation so API v2 implementations compiled before this addition remain
+binary compatible.
+
+The older `RuntimeStatus.automaticBackup()` and `AutoBackupState` members remain
+unchanged. They report enabled only for `BACKUP`; `REMIND` deliberately appears
+disabled in this legacy view. Consumers that need to distinguish reminders
+must call `currentWorldAutomation()`.
+
+```java
+CurrentWorldAutomationState automation = api.currentWorldAutomation();
+if (automation.mode() == CurrentWorldAutomationMode.REMIND) {
+    automation.nextRun().ifPresent(next -> renderReminderTime(next));
+}
+```
+
 `RestoreResult.Outcome.RESTART_HANDOFF_ACCEPTED` is dedicated-server-only. It
 means MineBackup safely handed ownership to the sidecar; it does not mean the
 world has been restored or the new server is online.
@@ -80,7 +99,7 @@ scheduler.scheduleAtFixedRate(
         5, 5, TimeUnit.MINUTES);
 ```
 
-This does not modify the administrator's `/mb auto` schedule. The caller owns
+This does not modify the administrator's world-bound `/mb auto` plan. The caller owns
 its timer and must avoid claiming a restore point when the result is
 `NO_CHANGES`, `BUSY`, or failed.
 

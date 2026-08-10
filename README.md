@@ -72,7 +72,7 @@ This lightweight mod is a bridge between the **MineBackup desktop application** 
 
 ## 📖 Command Reference
 
-All commands require operator/moderator permission on multiplayer and dedicated servers. On a singleplayer or client-hosted LAN world, only the world owner may use them — no OP grant needed. Most arguments support tab-completion (config IDs, folders, backup file names).
+On Fabric 26.1, commands use capability-specific native permission nodes, with OP level 2 as the compatibility fallback. The singleplayer/LAN world owner and the server console remain allowed. Help and completion show only permitted commands. See the [Fabric 26.1 configuration and permissions reference](Fabric/Fabric-26.1/docs/CONFIGURATION.md). Other maintained targets retain their existing permission behavior until ported. Most arguments support tab-completion (config IDs, folders, backup file names).
 
 | Command | Parameters | Description |
 | :--- | :--- | :--- |
@@ -88,8 +88,15 @@ All commands require operator/moderator permission on multiplayer and dedicated 
 | **/mb list folders** | `<config_id>` | Lists the folders tracked under a configuration profile. |
 | **/mb list backups current** | `[page]` | Interactively browses the current world's backups in chat, with a clickable restore button per entry. |
 | **/mb list backups** | `<config_id> <folder>` | Lists backup files for a specific, non-current folder. |
-| **/mb auto start** | `<minutes>` | Schedules automatic backups of the current world every `minutes` minutes. |
-| **/mb auto stop** | (none) | Stops the current world's automatic backup schedule. |
+| **/mb auto start** | `<minutes> [backup\|remind]` | Fabric 26.1: stores a world-bound automatic backup or reminder plan; mode defaults to `backup`. |
+| **/mb auto status** | (none) | Fabric 26.1: shows the current world's mode, interval, and next trigger. |
+| **/mb auto stop** | (none) | Fabric 26.1: stops only the current world's automation plan. |
+
+Fabric 26.1 stores automation outside the save, so restoring a world cannot
+restore an obsolete schedule. The `remind` mode is intended for players who
+want to choose a safe moment around unload-sensitive redstone. Full defaults,
+ranges, migration rules, and permission nodes are in the
+[configuration reference](Fabric/Fabric-26.1/docs/CONFIGURATION.md).
 
 ### **💡 Usage Example**
 
