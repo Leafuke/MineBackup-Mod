@@ -20,9 +20,9 @@ _Avoid_: Active restore, confirmation
 A current-world restore already submitted to FolderRewind and no longer safely cancellable by MineBackup.
 _Avoid_: Pending restore, rollback timer
 
-**Automatic backup schedule**:
-The single persisted interval that periodically requests a hot backup of whichever world is currently active.
-_Avoid_: FolderRewind auto task, target schedule
+**Current-world automation plan**:
+A world-bound mode and interval that become active only while their associated Minecraft world is hosted.
+_Avoid_: Instance schedule, FolderRewind auto task, target schedule
 
 **Dedicated restore handoff**:
 The accepted transfer of a dedicated-server restore from the Minecraft JVM to

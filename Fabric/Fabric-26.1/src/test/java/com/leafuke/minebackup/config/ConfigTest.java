@@ -32,7 +32,7 @@ class ConfigTest {
     }
 
     @Test
-    void currentWorldAutomaticBackupUsesOnlyNewIntervalKey() {
+    void instanceAutomaticBackupKeyIsRetainedUntilWorldMigration() {
         Properties properties = new Properties();
         properties.setProperty("auto.currentWorld.intervalMinutes", "30");
 
