@@ -34,10 +34,12 @@ public final class CommandHelpRegistry {
             entry(CommandCapability.BROWSE, "list backups", "[current [page] | <config_id> <folder>]",
                     "minebackup.help.summary.list_backups",
                     "/mb list backups"),
-            entry(CommandCapability.AUTOMATION, "auto start", "<minutes>", "minebackup.help.summary.auto_start",
-                    "/mb auto start 30"),
+            entry(CommandCapability.AUTOMATION, "auto start", "<minutes> [backup|remind]", "minebackup.help.summary.auto_start",
+                    "/mb auto start 30 remind"),
             entry(CommandCapability.AUTOMATION, "auto stop", "", "minebackup.help.summary.auto_stop",
-                    "/mb auto stop")
+                    "/mb auto stop"),
+            entry(CommandCapability.AUTOMATION, "auto status", "", "minebackup.help.summary.auto_status",
+                    "/mb auto status")
     );
     private static final Map<String, HelpEntry> LOOKUP = buildLookup();
 

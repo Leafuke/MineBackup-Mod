@@ -55,6 +55,20 @@ class WorldAutomationConfigStoreTest {
     }
 
     @Test
+    void writesAndLoadsReminderMode() throws Exception {
+        Path game = Files.createDirectories(root.resolve("game"));
+        WorldIdentity world = identity(game, "saves/world", "World");
+        WorldAutomationConfigStore store = new WorldAutomationConfigStore(root.resolve("config"));
+
+        assertTrue(store.write(world, WorldAutomationConfigStore.Settings.remind(15)));
+        var loaded = store.load(world);
+
+        assertTrue(loaded.valid());
+        assertEquals(WorldAutomationConfigStore.Mode.REMIND, loaded.settings().mode());
+        assertEquals(15, loaded.settings().intervalMinutes());
+    }
+
+    @Test
     void mismatchedAndInvalidFilesStayDisabled() throws Exception {
         Path game = Files.createDirectories(root.resolve("game"));
         WorldIdentity world = identity(game, "saves/world", "World");
@@ -73,6 +87,14 @@ class WorldAutomationConfigStoreTest {
 
         properties.setProperty("world.identity", world.value());
         properties.setProperty("automation.intervalMinutes", "invalid");
+        try (var writer = Files.newBufferedWriter(store.pathFor(world))) {
+            properties.store(writer, "test");
+        }
+        assertFalse(store.load(world).valid());
+        assertFalse(store.load(world).settings().active());
+
+        properties.setProperty("automation.mode", "BROKEN");
+        properties.setProperty("automation.intervalMinutes", "30");
         try (var writer = Files.newBufferedWriter(store.pathFor(world))) {
             properties.store(writer, "test");
         }

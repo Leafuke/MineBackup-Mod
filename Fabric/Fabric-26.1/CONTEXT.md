@@ -24,6 +24,18 @@ _Avoid_: Pending restore, rollback timer
 A world-bound mode and interval that become active only while their associated Minecraft world is hosted.
 _Avoid_: Instance schedule, FolderRewind auto task, target schedule
 
+**Backup automation mode**:
+A current-world automation plan that submits a hot backup whenever its interval becomes due.
+_Avoid_: Reminder mode, FolderRewind schedule
+
+**Reminder automation mode**:
+A current-world automation plan that notifies online players when its interval becomes due without submitting a backup.
+_Avoid_: Automatic backup, safe redstone snapshot
+
+**Command capability**:
+A native Minecraft permission atom controlling one coherent group of MineBackup commands, with the `minebackup:command/admin` atom granting every group.
+_Avoid_: Built-in role, player ACL
+
 **Dedicated restore handoff**:
 The accepted transfer of a dedicated-server restore from the Minecraft JVM to
 the MineBackup sidecar. Acceptance means the sidecar is subscribed, its

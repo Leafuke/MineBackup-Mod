@@ -7,6 +7,8 @@ import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
 import com.leafuke.minebackup.api.v2.BackupCatalogResult;
 import com.leafuke.minebackup.api.v2.BackupRequest;
 import com.leafuke.minebackup.api.v2.BackupResult;
+import com.leafuke.minebackup.api.v2.CurrentWorldAutomationMode;
+import com.leafuke.minebackup.api.v2.CurrentWorldAutomationState;
 import com.leafuke.minebackup.api.v2.MineBackupApi;
 import com.leafuke.minebackup.api.v2.MessageSlot;
 import com.leafuke.minebackup.api.v2.OperationFailure;
@@ -17,6 +19,8 @@ import com.leafuke.minebackup.api.v2.RuntimeEnvironment;
 import com.leafuke.minebackup.api.v2.RuntimeStatus;
 import com.leafuke.minebackup.client.ClientHooks;
 import com.leafuke.minebackup.client.RestoreUiMessages;
+import com.leafuke.minebackup.command.CommandCapability;
+import com.leafuke.minebackup.command.CommandPermissions;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.dedicated.DedicatedRestoreManager;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
@@ -68,7 +72,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     private final AutoSaveController autoSave =
             new AutoSaveController(operations::failActiveBackupTimeout);
     private final AutoBackupScheduler automaticBackups =
-            new AutoBackupScheduler(operations, coordinator);
+            new AutoBackupScheduler(operations, coordinator, this::broadcastAutomationReminder);
     private final DedicatedRestoreManager dedicatedRestore =
             new DedicatedRestoreManager(Config.restartDirectory());
 
@@ -829,7 +833,9 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
 
     @Override
     public OperationHandle<BackupResult> backupCurrent(BackupRequest request) {
-        return operations.backupCurrent(request);
+        OperationHandle<BackupResult> handle = operations.backupCurrent(request);
+        automaticBackups.observeExternalBackup(handle);
+        return handle;
     }
 
     @Override
@@ -865,15 +871,30 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     }
 
     public AutoBackupUpdateResult startAutomaticBackup(Duration interval) {
-        return automaticBackups.start(interval);
+        return legacyResult(automaticBackups.start(interval, CurrentWorldAutomationMode.BACKUP));
     }
 
     public AutoBackupUpdateResult stopAutomaticBackup() {
+        return legacyResult(automaticBackups.stop());
+    }
+
+    public AutomationUpdateResult startCurrentWorldAutomation(
+            Duration interval,
+            CurrentWorldAutomationMode mode) {
+        return automaticBackups.start(interval, mode);
+    }
+
+    public AutomationUpdateResult stopCurrentWorldAutomation() {
         return automaticBackups.stop();
     }
 
     public AutoBackupState automaticBackupState() {
         return automaticBackups.state();
+    }
+
+    @Override
+    public CurrentWorldAutomationState currentWorldAutomation() {
+        return automaticBackups.automationState();
     }
 
     @Override
@@ -967,6 +988,45 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                 .withHoverEvent(new HoverEvent.ShowText(
                         Component.translatable(translationKey)))
                 .withUnderlined(true));
+    }
+
+    private void broadcastAutomationReminder() {
+        MinecraftServer current = server;
+        if (current == null) {
+            return;
+        }
+        current.executeIfPossible(() -> {
+            if (server != current) {
+                return;
+            }
+            var players = current.getPlayerList().getPlayers();
+            if (players.isEmpty()) {
+                MineBackup.LOGGER.info(
+                        "Current-world backup reminder became due with no players online.");
+                return;
+            }
+            for (ServerPlayer player : players) {
+                MutableComponent message = Component.translatable(
+                        "minebackup.message.auto.reminder");
+                if (CommandPermissions.canUse(
+                        player.createCommandSourceStack(),
+                        CommandCapability.BACKUP)) {
+                    message.append(Component.literal(" "));
+                    message.append(actionLink(
+                            "minebackup.message.auto.reminder.backup",
+                            "/mb backup"));
+                }
+                player.sendSystemMessage(message);
+            }
+        });
+    }
+
+    private static AutoBackupUpdateResult legacyResult(AutomationUpdateResult result) {
+        CurrentWorldAutomationState state = result.state();
+        AutoBackupState legacy = state.mode() == CurrentWorldAutomationMode.BACKUP
+                ? new AutoBackupState(true, state.interval(), state.nextRun())
+                : AutoBackupState.disabled();
+        return new AutoBackupUpdateResult(result.success(), legacy, result.failure());
     }
 
     private void broadcast(Component message) {

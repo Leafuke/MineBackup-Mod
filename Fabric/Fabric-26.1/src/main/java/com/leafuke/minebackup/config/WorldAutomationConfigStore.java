@@ -45,6 +45,10 @@ public final class WorldAutomationConfigStore {
         }
 
         Mode mode = Mode.parse(properties.getProperty("automation.mode"));
+        if (mode == null) {
+            LOGGER.error("Disabled invalid automation mode for {}", world.displayName());
+            return new LoadResult(Settings.off(), false);
+        }
         if (mode == Mode.OFF) {
             return new LoadResult(Settings.off(), true);
         }
@@ -142,16 +146,17 @@ public final class WorldAutomationConfigStore {
 
     public enum Mode {
         OFF,
-        BACKUP;
+        BACKUP,
+        REMIND;
 
         static Mode parse(String value) {
             if (value == null || value.isBlank()) {
-                return OFF;
+                return null;
             }
             try {
                 return valueOf(value.trim().toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException exception) {
-                return OFF;
+                return null;
             }
         }
     }
@@ -175,6 +180,10 @@ public final class WorldAutomationConfigStore {
 
         public static Settings backup(int intervalMinutes) {
             return new Settings(Mode.BACKUP, intervalMinutes);
+        }
+
+        public static Settings remind(int intervalMinutes) {
+            return new Settings(Mode.REMIND, intervalMinutes);
         }
 
         public boolean active() {

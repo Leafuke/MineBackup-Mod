@@ -3,6 +3,10 @@ package com.leafuke.minebackup.api.v2;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.concurrent.CompletionStage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -70,5 +74,71 @@ class ApiValueTypesTest {
     @Test
     void apiVersionIsTwo() {
         assertEquals(2, MineBackupApi.API_VERSION);
+    }
+
+    @Test
+    void currentWorldAutomationStateEnforcesModeConstraints() {
+        Instant next = Instant.parse("2026-08-10T10:00:00Z");
+        var reminder = new CurrentWorldAutomationState(
+                true,
+                Optional.of("Redstone"),
+                CurrentWorldAutomationMode.REMIND,
+                Optional.of(Duration.ofMinutes(30)),
+                Optional.of(next));
+
+        assertEquals(CurrentWorldAutomationMode.REMIND, reminder.mode());
+        assertThrows(IllegalArgumentException.class, () -> new CurrentWorldAutomationState(
+                true, Optional.empty(), CurrentWorldAutomationMode.OFF,
+                Optional.of(Duration.ofMinutes(1)), Optional.empty()));
+        assertThrows(IllegalArgumentException.class, () -> new CurrentWorldAutomationState(
+                false, Optional.empty(), CurrentWorldAutomationMode.BACKUP,
+                Optional.of(Duration.ofMinutes(1)), Optional.of(next)));
+    }
+
+    @Test
+    void defaultApiMethodMapsOnlyLegacyEnabledStateToBackup() {
+        MineBackupApi legacy = legacyApi(new RuntimeStatus(
+                RuntimeEnvironment.INTEGRATED,
+                true,
+                false,
+                Optional.of("not dedicated"),
+                Optional.empty(),
+                new AutoBackupState(
+                        true,
+                        Optional.of(Duration.ofMinutes(20)),
+                        Optional.of(Instant.parse("2026-08-10T10:00:00Z"))),
+                Optional.empty()));
+
+        assertEquals(CurrentWorldAutomationMode.BACKUP, legacy.currentWorldAutomation().mode());
+        assertEquals(Duration.ofMinutes(20), legacy.currentWorldAutomation().interval().orElseThrow());
+    }
+
+    private static MineBackupApi legacyApi(RuntimeStatus status) {
+        return new MineBackupApi() {
+            @Override
+            public int apiVersion() {
+                return API_VERSION;
+            }
+
+            @Override
+            public OperationHandle<BackupResult> backupCurrent(BackupRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public OperationHandle<RestoreResult> restoreCurrent(RestoreRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public CompletionStage<BackupCatalogResult> listCurrentBackups(BackupCatalogRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public RuntimeStatus runtimeStatus() {
+                return status;
+            }
+        };
     }
 }

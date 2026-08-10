@@ -17,5 +17,9 @@ class CommandHelpRegistryTest {
                 List.of("restore", "confirm", "stop"),
                 CommandHelpRegistry.visiblePaths(
                         capability -> capability == CommandCapability.RESTORE));
+        assertEquals(
+                List.of("auto start", "auto stop", "auto status"),
+                CommandHelpRegistry.visiblePaths(
+                        capability -> capability == CommandCapability.AUTOMATION));
     }
 }
