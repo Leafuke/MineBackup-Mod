@@ -19,6 +19,8 @@ import com.leafuke.minebackup.api.v2.RuntimeEnvironment;
 import com.leafuke.minebackup.api.v2.RuntimeStatus;
 import com.leafuke.minebackup.client.ClientHooks;
 import com.leafuke.minebackup.client.RestoreUiMessages;
+import com.leafuke.minebackup.command.CommandCapability;
+import com.leafuke.minebackup.command.CommandPermissions;
 import com.leafuke.minebackup.compat.TextEvents;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.dedicated.DedicatedRestoreManager;
@@ -1013,7 +1015,8 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             for (ServerPlayerEntity player : players) {
                 MutableText message = Text.translatable(
                         "minebackup.message.auto.reminder");
-                if (player.getCommandSource().hasPermissionLevel(2)) {
+                if (CommandPermissions.canUse(
+                        player.getCommandSource(), CommandCapability.BACKUP)) {
                     message.append(Text.literal(" "));
                     message.append(actionLink(
                             "minebackup.message.auto.reminder.backup",

@@ -19,6 +19,8 @@ import com.leafuke.minebackup.api.v2.RuntimeEnvironment;
 import com.leafuke.minebackup.api.v2.RuntimeStatus;
 import com.leafuke.minebackup.client.ClientHooks;
 import com.leafuke.minebackup.client.RestoreUiMessages;
+import com.leafuke.minebackup.command.CommandCapability;
+import com.leafuke.minebackup.command.CommandPermissions;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.dedicated.DedicatedRestoreManager;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
@@ -1016,7 +1018,8 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             for (ServerPlayer player : players) {
                 MutableComponent message = Component.translatable(
                         "minebackup.message.auto.reminder");
-                if (player.createCommandSourceStack().hasPermission(2)) {
+                if (CommandPermissions.canUse(
+                        player.createCommandSourceStack(), CommandCapability.BACKUP)) {
                     message.append(Component.literal(" "));
                     message.append(actionLink(
                             "minebackup.message.auto.reminder.backup",

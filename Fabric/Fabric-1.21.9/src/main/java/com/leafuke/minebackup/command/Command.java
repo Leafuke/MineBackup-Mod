@@ -19,7 +19,6 @@ import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 import com.leafuke.minebackup.runtime.LocalSaveCoordinator;
 import com.leafuke.minebackup.runtime.AutomationUpdateResult;
 import com.leafuke.minebackup.runtime.RestoreControlResult;
-import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -30,7 +29,6 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -50,28 +48,36 @@ public final class Command {
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("mb")
-                .requires(Command::hasCommandAccess)
+                .requires(CommandPermissions::hasAnyAccess)
                 .executes(context -> sendHelp(context.getSource()))
                 .then(Commands.literal("help")
                         .executes(context -> sendHelp(context.getSource()))
                         .then(Commands.argument("command", StringArgumentType.greedyString())
-                                .suggests((context, builder) -> CommandHelpRegistry.suggestCommands(builder))
+                                .suggests((context, builder) -> CommandHelpRegistry.suggestCommands(
+                                        context.getSource(), builder))
                                 .executes(context -> {
                                     String command = StringArgumentType.getString(context, "command");
                                     context.getSource().sendSuccess(
-                                            () -> CommandHelpRegistry.buildCommandHelp(command),
+                                            () -> CommandHelpRegistry.buildCommandHelp(
+                                                    context.getSource(), command),
                                             false);
                                     return 1;
                                 })))
                 .then(Commands.literal("save")
+                        .requires(source -> CommandPermissions.canUse(
+                                source, CommandCapability.BACKUP))
                         .executes(context -> saveCurrentWorld(context.getSource()) ? 1 : 0))
                 .then(Commands.literal("backup")
+                        .requires(source -> CommandPermissions.canUse(
+                                source, CommandCapability.BACKUP))
                         .executes(context -> executeBackupCurrent(context.getSource(), null))
                         .then(Commands.argument("comment", StringArgumentType.greedyString())
                                 .executes(context -> executeBackupCurrent(
                                         context.getSource(),
                                         StringArgumentType.getString(context, "comment")))))
                 .then(Commands.literal("restore")
+                        .requires(source -> CommandPermissions.canUse(
+                                source, CommandCapability.RESTORE))
                         .executes(context -> executeRestoreCurrent(context.getSource(), null))
                         .then(Commands.argument("file", StringArgumentType.string())
                                 .suggests((context, builder) -> CommandSuggestions.suggestCurrentBackups(builder))
@@ -79,8 +85,12 @@ public final class Command {
                                         context.getSource(),
                                         StringArgumentType.getString(context, "file")))))
                 .then(Commands.literal("confirm")
+                        .requires(source -> CommandPermissions.canUse(
+                                source, CommandCapability.RESTORE))
                         .executes(context -> executeRestoreConfirm(context.getSource())))
                 .then(Commands.literal("stop")
+                        .requires(source -> CommandPermissions.canUse(
+                                source, CommandCapability.RESTORE))
                         .executes(context -> executeRestoreStop(context.getSource())))
                 .then(buildTargetCommands())
                 .then(buildListCommands())
@@ -90,6 +100,8 @@ public final class Command {
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> buildTargetCommands() {
         return Commands.literal("target")
                 .then(Commands.literal("backup")
+                        .requires(source -> CommandPermissions.canUse(
+                                source, CommandCapability.TARGET_BACKUP))
                         .then(Commands.argument("config_id", StringArgumentType.word())
                                 .suggests((context, builder) -> CommandSuggestions.suggestConfigIds(builder))
                                 .then(Commands.argument("folder", StringArgumentType.string())
@@ -108,6 +120,8 @@ public final class Command {
                                                         StringArgumentType.getString(context, "folder"),
                                                         StringArgumentType.getString(context, "comment")))))))
                 .then(Commands.literal("restore")
+                        .requires(source -> CommandPermissions.canUse(
+                                source, CommandCapability.TARGET_RESTORE))
                         .then(Commands.argument("config_id", StringArgumentType.word())
                                 .suggests((context, builder) -> CommandSuggestions.suggestConfigIds(builder))
                                 .then(Commands.argument("folder", StringArgumentType.string())
@@ -128,6 +142,8 @@ public final class Command {
 
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> buildListCommands() {
         return Commands.literal("list")
+                .requires(source -> CommandPermissions.canUse(
+                        source, CommandCapability.BROWSE))
                 .then(Commands.literal("configs")
                         .executes(context -> executeListConfigs(context.getSource())))
                 .then(Commands.literal("folders")
@@ -158,6 +174,8 @@ public final class Command {
 
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> buildAutoCommands() {
         return Commands.literal("auto")
+                .requires(source -> CommandPermissions.canUse(
+                        source, CommandCapability.AUTOMATION))
                 .then(Commands.literal("start")
                         .then(Commands.argument(
                                         "minutes",
@@ -179,6 +197,8 @@ public final class Command {
                                                 IntegerArgumentType.getInteger(context, "minutes"),
                                                 CurrentWorldAutomationMode.REMIND)))))
                 .then(Commands.literal("stop")
+                        .requires(source -> CommandPermissions.canUse(
+                                source, CommandCapability.AUTOMATION))
                         .executes(context -> executeAutoStop(context.getSource())))
                 .then(Commands.literal("status")
                         .executes(context -> executeAutoStatus(context.getSource())));
@@ -313,7 +333,12 @@ public final class Command {
                                 return;
                             }
                             MutableComponent message =
-                                    buildCurrentBackupList(result.entries(), page);
+                                    buildCurrentBackupList(
+                                            result.entries(),
+                                            page,
+                                            CommandPermissions.canUse(
+                                                    source,
+                                                    CommandCapability.RESTORE));
                             source.sendSuccess(() -> message, false);
                         }));
         return 1;
@@ -321,7 +346,8 @@ public final class Command {
 
     private static MutableComponent buildCurrentBackupList(
             List<BackupEntry> entries,
-            int requestedPage) {
+            int requestedPage,
+            boolean canRestore) {
         CurrentBackupListModel.Page page = CurrentBackupListModel.create(
                 entries,
                 requestedPage,
@@ -338,8 +364,10 @@ public final class Command {
             for (CurrentBackupListModel.Row row : page.rows()) {
                 result.append(Component.literal("\n §7- "));
                 result.append(currentBackupLabel(row));
-                result.append(Component.literal(" "));
-                result.append(currentRestoreButton(row));
+                if (canRestore) {
+                    result.append(Component.literal(" "));
+                    result.append(currentRestoreButton(row));
+                }
             }
         }
 
@@ -569,7 +597,7 @@ public final class Command {
     }
 
     private static int sendHelp(CommandSourceStack source) {
-        source.sendSuccess(CommandHelpRegistry::buildRootHelp, false);
+        source.sendSuccess(() -> CommandHelpRegistry.buildRootHelp(source), false);
         return 1;
     }
 
@@ -595,25 +623,6 @@ public final class Command {
         if (Files.isDirectory(source.getServer().getWorldPath(LevelResource.ROOT).resolve("voxy"))) {
             source.sendSystemMessage(Component.translatable("minebackup.message.command.voxy_may_cause_issues"));
         }
-    }
-
-    private static boolean hasCommandAccess(CommandSourceStack source) {
-        MinecraftServer server = source.getServer();
-        if (server == null) {
-            // Minecraft uses a server-less, no-permission source while compiling
-            // command trees for the client. Returning false marks this node as
-            // restricted without dereferencing an unavailable server.
-            return false;
-        }
-        if (server.isDedicatedServer()) {
-            return source.hasPermission(2);
-        }
-        ServerPlayer player = source.getPlayer();
-        if (player == null) {
-            return false;
-        }
-        GameProfile owner = server.getSingleplayerProfile();
-        return owner != null && owner.id().equals(player.getGameProfile().id());
     }
 
 }
