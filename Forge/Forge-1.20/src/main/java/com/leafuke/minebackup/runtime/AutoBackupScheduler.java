@@ -6,7 +6,14 @@ import com.leafuke.minebackup.api.v2.BackupRequest;
 import com.leafuke.minebackup.api.v2.BackupResult;
 import com.leafuke.minebackup.api.v2.OperationFailure;
 import com.leafuke.minebackup.config.Config;
+import com.leafuke.minebackup.config.WorldAutomationConfigStore;
+import com.leafuke.minebackup.config.WorldIdentity;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.storage.LevelResource;
+import net.minecraftforge.fml.loading.FMLPaths;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,78 +29,119 @@ final class AutoBackupScheduler implements AutoCloseable {
     private final CurrentWorldOperationCoordinator operations;
     private final ScheduledExecutorService scheduler;
     private final Clock clock;
+    private final WorldAutomationConfigStore configStore;
+    private final Path gameDirectory;
 
     private boolean serverActive;
     private boolean closed;
     private long generation;
     private ScheduledFuture<?> future;
     private Instant nextRun;
+    private WorldIdentity activeWorld;
+    private WorldAutomationConfigStore.Settings settings =
+            WorldAutomationConfigStore.Settings.off();
 
     AutoBackupScheduler(
             CurrentWorldOperationCoordinator operations,
             ScheduledExecutorService scheduler) {
-        this(operations, scheduler, Clock.systemUTC());
+        this(
+                operations,
+                scheduler,
+                Clock.systemUTC(),
+                new WorldAutomationConfigStore(Config.worldAutomationDirectory()),
+                FMLPaths.GAMEDIR.get());
     }
 
     AutoBackupScheduler(
             CurrentWorldOperationCoordinator operations,
             ScheduledExecutorService scheduler,
-            Clock clock) {
+            Clock clock,
+            WorldAutomationConfigStore configStore,
+            Path gameDirectory) {
         this.operations = operations;
         this.scheduler = scheduler;
         this.clock = clock;
+        this.configStore = configStore;
+        this.gameDirectory = gameDirectory;
     }
 
-    synchronized void serverStarted() {
+    synchronized StartupResult serverStarted(MinecraftServer server) {
         if (closed) {
-            return;
+            return new StartupResult(WorldAutomationConfigStore.Migration.NONE, null);
+        }
+        try {
+            activeWorld = WorldIdentity.resolve(
+                    gameDirectory,
+                    server.getWorldPath(LevelResource.ROOT),
+                    server.getWorldData().getLevelName());
+        } catch (IOException exception) {
+            MineBackup.LOGGER.error("Failed to identify the current world for automation", exception);
+            serverActive = true;
+            settings = WorldAutomationConfigStore.Settings.off();
+            return new StartupResult(WorldAutomationConfigStore.Migration.WORLD_LOAD_FAILED, null);
+        }
+
+        WorldAutomationConfigStore.LoadResult loaded = configStore.load(activeWorld);
+        settings = loaded.settings();
+        WorldAutomationConfigStore.Migration migration = loaded.valid()
+                ? migrateLegacyLocked()
+                : WorldAutomationConfigStore.Migration.WORLD_LOAD_FAILED;
+        if (migration == WorldAutomationConfigStore.Migration.WORLD_WRITE_FAILED) {
+            settings = WorldAutomationConfigStore.Settings.off();
         }
         serverActive = true;
-        restartFromConfigLocked();
+        restartLocked();
+        return new StartupResult(migration, activeWorld.displayName());
     }
 
     synchronized void serverStopped() {
         serverActive = false;
         generation++;
         cancelFutureLocked();
+        activeWorld = null;
+        settings = WorldAutomationConfigStore.Settings.off();
     }
 
-    AutoBackupUpdateResult start(Duration interval) {
+    synchronized AutoBackupUpdateResult start(Duration interval) {
         int minutes = validateInterval(interval);
-        if (!Config.setAutoBackup(minutes)) {
+        if (!serverActive || activeWorld == null || closed) {
+            return failure(OperationFailure.Code.NO_ACTIVE_SERVER, "No active world for automatic backup");
+        }
+        WorldAutomationConfigStore.Settings updated =
+                WorldAutomationConfigStore.Settings.backup(minutes);
+        if (!configStore.write(activeWorld, updated)) {
             return failure(OperationFailure.Code.CONFIG_WRITE_FAILED, "Failed to persist automatic backup");
         }
-        synchronized (this) {
-            if (!closed) {
-                restartFromConfigLocked();
-            }
-            return success(stateLocked());
-        }
+        settings = updated;
+        restartLocked();
+        return success(stateLocked());
     }
 
-    AutoBackupUpdateResult stop() {
-        if (!Config.clearAutoBackup()) {
+    synchronized AutoBackupUpdateResult stop() {
+        if (!serverActive || activeWorld == null || closed) {
+            return failure(OperationFailure.Code.NO_ACTIVE_SERVER, "No active world for automatic backup");
+        }
+        WorldAutomationConfigStore.Settings updated = WorldAutomationConfigStore.Settings.off();
+        if (!configStore.write(activeWorld, updated)) {
             return failure(OperationFailure.Code.CONFIG_WRITE_FAILED, "Failed to persist automatic backup");
         }
-        synchronized (this) {
-            generation++;
-            cancelFutureLocked();
-            return success(AutoBackupState.disabled());
-        }
+        settings = updated;
+        generation++;
+        cancelFutureLocked();
+        return success(AutoBackupState.disabled());
     }
 
     synchronized AutoBackupState state() {
         return stateLocked();
     }
 
-    private synchronized void restartFromConfigLocked() {
+    private void restartLocked() {
         generation++;
         cancelFutureLocked();
-        Config.AutoBackup config = Config.get().autoBackup();
-        if (!serverActive || config == null || closed) {
+        if (!serverActive || !settings.active() || closed) {
             return;
         }
-        scheduleLocked(config.intervalMinutes(), generation);
+        scheduleLocked(settings.intervalMinutes(), generation);
     }
 
     private void scheduleLocked(int minutes, long expectedGeneration) {
@@ -136,12 +184,11 @@ final class AutoBackupScheduler implements AutoCloseable {
                                 "Skipped automatic hot backup because another current-world operation is active.");
                     }
                     synchronized (AutoBackupScheduler.this) {
-                        Config.AutoBackup current = Config.get().autoBackup();
                         if (!closed
                                 && serverActive
                                 && expectedGeneration == generation
-                                && current != null
-                                && current.intervalMinutes() == minutes) {
+                                && settings.active()
+                                && settings.intervalMinutes() == minutes) {
                             scheduleLocked(minutes, expectedGeneration);
                         }
                     }
@@ -149,13 +196,12 @@ final class AutoBackupScheduler implements AutoCloseable {
     }
 
     private synchronized AutoBackupState stateLocked() {
-        Config.AutoBackup config = Config.get().autoBackup();
-        if (config == null) {
+        if (!settings.active()) {
             return AutoBackupState.disabled();
         }
         return new AutoBackupState(
                 true,
-                Optional.of(Duration.ofMinutes(config.intervalMinutes())),
+                Optional.of(Duration.ofMinutes(settings.intervalMinutes())),
                 Optional.ofNullable(nextRun));
     }
 
@@ -193,6 +239,17 @@ final class AutoBackupScheduler implements AutoCloseable {
         }
     }
 
+    private WorldAutomationConfigStore.Migration migrateLegacyLocked() {
+        Config.AutoBackup legacy = Config.get().autoBackup();
+        WorldAutomationConfigStore.MigrationResult migration = configStore.migrateLegacyBackup(
+                activeWorld,
+                settings,
+                legacy == null ? null : legacy.intervalMinutes(),
+                Config::clearLegacyCurrentWorldAutoBackup);
+        settings = migration.settings();
+        return migration.migration();
+    }
+
     @Override
     public synchronized void close() {
         if (closed) {
@@ -202,5 +259,10 @@ final class AutoBackupScheduler implements AutoCloseable {
         serverActive = false;
         generation++;
         cancelFutureLocked();
+        activeWorld = null;
+        settings = WorldAutomationConfigStore.Settings.off();
+    }
+
+    record StartupResult(WorldAutomationConfigStore.Migration migration, String worldName) {
     }
 }

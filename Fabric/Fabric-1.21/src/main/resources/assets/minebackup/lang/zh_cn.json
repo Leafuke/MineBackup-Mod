@@ -12,6 +12,8 @@
   "minebackup.message.auto.started": "§a[MineBackup] 已启动当前世界自动热备份，间隔 §f%s §a分钟。",
   "minebackup.message.auto.stopped": "§a[MineBackup] 已停止当前世界自动热备份。",
   "minebackup.message.auto.legacy_disabled": "§e[MineBackup] 已禁用旧版目标自动备份，请执行 §f/mb auto start <minutes> §e重新设置。",
+  "minebackup.message.auto.world_migrated": "§e[MineBackup] 已将原自动备份计划绑定到世界 §f%s§e。",
+  "minebackup.message.auto.world_migration_failed": "§c[MineBackup] 无法将原自动备份计划绑定到当前世界，计划保持禁用；请查看服务端日志。",
 
   "minebackup.message.list_configs.title": "§a可用备份配置",
   "minebackup.message.list_configs.entry": "\n §7- §fID §b%s §7| §f%s",

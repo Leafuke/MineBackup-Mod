@@ -103,7 +103,34 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         Config.load();
         dedicatedRestore.loadLastResult();
         knotLink.startSubscriber(this::handleSignal);
-        automaticBackups.serverStarted();
+        AutoBackupScheduler.StartupResult autoStartup = automaticBackups.serverStarted(startingServer);
+
+        switch (autoStartup.migration()) {
+            case MIGRATED -> {
+                MineBackup.LOGGER.info(
+                        "Bound the legacy automatic backup schedule to world '{}'.",
+                        autoStartup.worldName());
+                startingServer.executeIfPossible(() -> feedback.broadcastOnServer(
+                        startingServer,
+                        Component.translatable(
+                                "minebackup.message.auto.world_migrated",
+                                autoStartup.worldName())));
+            }
+            case EXISTING_WORLD_PLAN_PRESERVED -> MineBackup.LOGGER.info(
+                    "Kept the existing world automation plan for '{}' while removing the legacy global schedule.",
+                    autoStartup.worldName());
+            case WORLD_WRITE_FAILED, GLOBAL_CLEAR_FAILED, WORLD_LOAD_FAILED -> {
+                MineBackup.LOGGER.error(
+                        "Unable to complete automatic backup migration for '{}': {}",
+                        autoStartup.worldName(),
+                        autoStartup.migration());
+                startingServer.executeIfPossible(() -> feedback.broadcastOnServer(
+                        startingServer,
+                        Component.translatable("minebackup.message.auto.world_migration_failed")));
+            }
+            case NONE -> {
+            }
+        }
 
         if (dedicatedServer) {
             DedicatedRestoreManager.Availability availability = dedicatedRestore.availability(

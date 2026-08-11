@@ -74,22 +74,7 @@ public final class Config {
         return CURRENT.get();
     }
 
-    public static synchronized boolean setAutoBackup(int intervalMinutes) {
-        if (intervalMinutes < 1
-                || intervalMinutes > MAX_AUTO_BACKUP_INTERVAL_MINUTES) {
-            throw new IllegalArgumentException("Invalid automatic backup settings");
-        }
-
-        Snapshot updated = CURRENT.get().withAutoBackup(
-                new AutoBackup(intervalMinutes));
-        if (!write(updated)) {
-            return false;
-        }
-        CURRENT.set(updated);
-        return true;
-    }
-
-    public static synchronized boolean clearAutoBackup() {
+    public static synchronized boolean clearLegacyCurrentWorldAutoBackup() {
         Snapshot updated = CURRENT.get().withAutoBackup(null);
         if (!write(updated)) {
             return false;
@@ -270,6 +255,10 @@ public final class Config {
 
     public static Path restartDirectory() {
         return FMLPaths.CONFIGDIR.get().resolve("minebackup").resolve("restart");
+    }
+
+    public static Path worldAutomationDirectory() {
+        return FMLPaths.CONFIGDIR.get().resolve("minebackup").resolve("worlds");
     }
 
     static boolean migrateLegacyConfig(Path target) {
