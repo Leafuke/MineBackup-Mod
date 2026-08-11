@@ -6,6 +6,8 @@ import com.leafuke.minebackup.api.v2.BackupCatalogResult;
 import com.leafuke.minebackup.api.v2.BackupEntry;
 import com.leafuke.minebackup.api.v2.BackupRequest;
 import com.leafuke.minebackup.api.v2.BackupResult;
+import com.leafuke.minebackup.api.v2.CurrentWorldAutomationMode;
+import com.leafuke.minebackup.api.v2.CurrentWorldAutomationState;
 import com.leafuke.minebackup.api.v2.OperationFailure;
 import com.leafuke.minebackup.api.v2.OperationHandle;
 import com.leafuke.minebackup.api.v2.OperationPhase;
@@ -16,7 +18,7 @@ import com.leafuke.minebackup.compat.TextEvents;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 import com.leafuke.minebackup.runtime.LocalSaveCoordinator;
-import com.leafuke.minebackup.runtime.AutoBackupUpdateResult;
+import com.leafuke.minebackup.runtime.AutomationUpdateResult;
 import com.leafuke.minebackup.runtime.RestoreControlResult;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
@@ -35,12 +37,15 @@ import net.minecraft.util.WorldSavePath;
 
 import java.nio.file.Files;
 import java.time.Duration;
+import java.time.format.DateTimeFormatter;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 
 public final class Command {
+    private static final DateTimeFormatter AUTOMATION_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
     private Command() {
     }
 
@@ -162,9 +167,22 @@ public final class Command {
                                                 Config.MAX_AUTO_BACKUP_INTERVAL_MINUTES))
                                 .executes(context -> executeAutoStart(
                                         context.getSource(),
-                                        IntegerArgumentType.getInteger(context, "minutes")))))
+                                        IntegerArgumentType.getInteger(context, "minutes"),
+                                        CurrentWorldAutomationMode.BACKUP))
+                                .then(CommandManager.literal("backup")
+                                        .executes(context -> executeAutoStart(
+                                                context.getSource(),
+                                                IntegerArgumentType.getInteger(context, "minutes"),
+                                                CurrentWorldAutomationMode.BACKUP)))
+                                .then(CommandManager.literal("remind")
+                                        .executes(context -> executeAutoStart(
+                                                context.getSource(),
+                                                IntegerArgumentType.getInteger(context, "minutes"),
+                                                CurrentWorldAutomationMode.REMIND)))))
                 .then(CommandManager.literal("stop")
-                        .executes(context -> executeAutoStop(context.getSource())));
+                        .executes(context -> executeAutoStop(context.getSource())))
+                .then(CommandManager.literal("status")
+                        .executes(context -> executeAutoStatus(context.getSource())));
     }
 
     private static int executeBackupCurrent(ServerCommandSource source, String comment) {
@@ -422,20 +440,28 @@ public final class Command {
         return 0;
     }
 
-    private static int executeAutoStart(ServerCommandSource source, int minutes) {
-        AutoBackupUpdateResult result = MineBackup.startAutomaticBackup(Duration.ofMinutes(minutes));
+    private static int executeAutoStart(
+            ServerCommandSource source,
+            int minutes,
+            CurrentWorldAutomationMode mode) {
+        AutomationUpdateResult result = MineBackup.startCurrentWorldAutomation(
+                Duration.ofMinutes(minutes), mode);
         if (!result.success()) {
             sendAutoFailure(source, result);
             return 0;
         }
         source.sendFeedback(
-                () -> Text.translatable("minebackup.message.auto.started", minutes),
+                () -> Text.translatable(
+                        mode == CurrentWorldAutomationMode.BACKUP
+                                ? "minebackup.message.auto.started"
+                                : "minebackup.message.auto.remind_started",
+                        minutes),
                 true);
         return 1;
     }
 
     private static int executeAutoStop(ServerCommandSource source) {
-        AutoBackupUpdateResult result = MineBackup.stopAutomaticBackup();
+        AutomationUpdateResult result = MineBackup.stopCurrentWorldAutomation();
         if (!result.success()) {
             sendAutoFailure(source, result);
             return 0;
@@ -443,6 +469,39 @@ public final class Command {
         source.sendFeedback(
                 () -> Text.translatable("minebackup.message.auto.stopped"),
                 true);
+        return 1;
+    }
+
+    private static int executeAutoStatus(ServerCommandSource source) {
+        CurrentWorldAutomationState state = MineBackup.api().currentWorldAutomation();
+        if (!state.currentWorldAvailable()) {
+            source.sendError(Text.translatable("minebackup.message.auto.status.no_world"));
+            return 0;
+        }
+        String world = state.worldName().orElseGet(() ->
+                Text.translatable("minebackup.message.unknown_world").getString());
+        if (state.mode() == CurrentWorldAutomationMode.OFF) {
+            source.sendFeedback(
+                    () -> Text.translatable("minebackup.message.auto.status.disabled", world),
+                    false);
+            return 1;
+        }
+        String modeKey = state.mode() == CurrentWorldAutomationMode.BACKUP
+                ? "minebackup.message.auto.mode.backup"
+                : "minebackup.message.auto.mode.remind";
+        long minutes = state.interval().orElseThrow().toMinutes();
+        String nextRun = state.nextRun()
+                .map(AUTOMATION_TIME_FORMAT::format)
+                .orElseGet(() -> Text.translatable(
+                        "minebackup.message.auto.status.next_pending").getString());
+        source.sendFeedback(
+                () -> Text.translatable(
+                        "minebackup.message.auto.status.enabled",
+                        world,
+                        Text.translatable(modeKey),
+                        minutes,
+                        nextRun),
+                false);
         return 1;
     }
 
@@ -472,7 +531,7 @@ public final class Command {
         }));
     }
 
-    private static void sendAutoFailure(ServerCommandSource source, AutoBackupUpdateResult result) {
+    private static void sendAutoFailure(ServerCommandSource source, AutomationUpdateResult result) {
         sendOperationFailure(source, result.failure());
     }
 

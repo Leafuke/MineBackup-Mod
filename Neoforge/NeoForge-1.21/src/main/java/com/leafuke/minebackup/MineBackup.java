@@ -2,10 +2,12 @@ package com.leafuke.minebackup;
 
 import com.leafuke.minebackup.command.Command;
 import com.leafuke.minebackup.api.v2.MineBackupApi;
+import com.leafuke.minebackup.api.v2.CurrentWorldAutomationMode;
 import com.leafuke.minebackup.client.MineBackupClient;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
 import com.leafuke.minebackup.runtime.MineBackupRuntime;
 import com.leafuke.minebackup.runtime.AutoBackupUpdateResult;
+import com.leafuke.minebackup.runtime.AutomationUpdateResult;
 import com.leafuke.minebackup.runtime.RestoreControlResult;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -68,6 +70,16 @@ public final class MineBackup {
 
     public static AutoBackupUpdateResult stopAutomaticBackup() {
         return RUNTIME.stopAutomaticBackup();
+    }
+
+    public static AutomationUpdateResult startCurrentWorldAutomation(
+            Duration interval,
+            CurrentWorldAutomationMode mode) {
+        return RUNTIME.startCurrentWorldAutomation(interval, mode);
+    }
+
+    public static AutomationUpdateResult stopCurrentWorldAutomation() {
+        return RUNTIME.stopCurrentWorldAutomation();
     }
 
     public static void completeClientRestore(boolean success, String reason) {

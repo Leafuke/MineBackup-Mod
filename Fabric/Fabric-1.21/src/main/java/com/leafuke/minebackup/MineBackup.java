@@ -2,10 +2,12 @@ package com.leafuke.minebackup;
 
 import com.leafuke.minebackup.command.Command;
 import com.leafuke.minebackup.api.v2.MineBackupApi;
+import com.leafuke.minebackup.api.v2.CurrentWorldAutomationMode;
 import com.leafuke.minebackup.compat.TextEvents;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
 import com.leafuke.minebackup.runtime.MineBackupRuntime;
 import com.leafuke.minebackup.runtime.AutoBackupUpdateResult;
+import com.leafuke.minebackup.runtime.AutomationUpdateResult;
 import com.leafuke.minebackup.runtime.RestoreControlResult;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -54,6 +56,16 @@ public final class MineBackup implements ModInitializer {
 
     public static AutoBackupUpdateResult stopAutomaticBackup() {
         return RUNTIME.stopAutomaticBackup();
+    }
+
+    public static AutomationUpdateResult startCurrentWorldAutomation(
+            Duration interval,
+            CurrentWorldAutomationMode mode) {
+        return RUNTIME.startCurrentWorldAutomation(interval, mode);
+    }
+
+    public static AutomationUpdateResult stopCurrentWorldAutomation() {
+        return RUNTIME.stopCurrentWorldAutomation();
     }
 
     public static void completeClientRestore(boolean success, String reason) {
