@@ -110,8 +110,10 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     }
 
     private void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
-        ServerPlayer player = (ServerPlayer) event.getEntity();
-        MinecraftServer server = player.getServer();
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+        MinecraftServer server = this.server;
         if (server == null) {
             return;
         }
@@ -136,8 +138,8 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             message.append(Component.translatable("minebackup.message.auto.welcome.button.enable")
                     .withStyle(style -> style
                             .withColor(ChatFormatting.GREEN)
-                            .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/mb auto start "))
-                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                            .withClickEvent(new ClickEvent.SuggestCommand("/mb auto start "))
+                            .withHoverEvent(new HoverEvent.ShowText(
                                     Component.translatable("minebackup.message.auto.welcome.button.enable.hover")))));
         } else {
             // Enabled: show status + [Disable] + [Reconfigure] buttons
@@ -159,15 +161,15 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             message.append(Component.translatable("minebackup.message.auto.welcome.button.disable")
                     .withStyle(style -> style
                             .withColor(ChatFormatting.RED)
-                            .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/mb auto stop"))
-                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                            .withClickEvent(new ClickEvent.RunCommand("/mb auto stop"))
+                            .withHoverEvent(new HoverEvent.ShowText(
                                     Component.translatable("minebackup.message.auto.welcome.button.disable.hover")))));
             message.append(Component.literal(" "));
             message.append(Component.translatable("minebackup.message.auto.welcome.button.config")
                     .withStyle(style -> style
                             .withColor(ChatFormatting.YELLOW)
-                            .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/mb auto start "))
-                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                            .withClickEvent(new ClickEvent.SuggestCommand("/mb auto start "))
+                            .withHoverEvent(new HoverEvent.ShowText(
                                     Component.translatable("minebackup.message.auto.welcome.button.config.hover")))));
         }
 

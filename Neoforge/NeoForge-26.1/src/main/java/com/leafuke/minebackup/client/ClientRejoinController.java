@@ -77,10 +77,10 @@ public final class ClientRejoinController {
                 // Show the message and provide a way back to the world selection screen
                 client.disconnect(new GenericMessageScreen(message), false);
                 try {
-                    client.gui.setScreen(new SelectWorldScreen(new TitleScreen()));
+                    client.setScreen(new SelectWorldScreen(new TitleScreen()));
                 } catch (RuntimeException exception) {
                     MineBackup.LOGGER.warn("Failed to open world selection after restore failure", exception);
-                    client.gui.setScreen(new TitleScreen());
+                    client.setScreen(new TitleScreen());
                 }
             }
         });

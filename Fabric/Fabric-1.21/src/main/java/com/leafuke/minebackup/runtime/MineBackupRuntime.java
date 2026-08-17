@@ -103,7 +103,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     }
 
     private void onPlayerJoin(
-            net.minecraft.server.network.ServerGamePacketListenerImpl handler,
+            net.minecraft.server.network.ServerPlayNetworkHandler handler,
             net.fabricmc.fabric.api.networking.v1.PacketSender sender,
             MinecraftServer server) {
         ServerPlayerEntity player = handler.getPlayer();
