@@ -30,6 +30,8 @@ import com.leafuke.minebackup.update.VersionNumber;
 import com.mojang.authlib.GameProfile;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
@@ -41,6 +43,8 @@ import net.minecraft.world.level.storage.LevelResource;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -57,6 +61,8 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     private static final String MINIMUM_MAIN_VERSION = "1.16.0";
     private static final long RELEASE_TIMEOUT_NANOS = Duration.ofSeconds(8).toNanos();
     private static final int READY_STREAK_REQUIRED = 3;
+    private static final DateTimeFormatter AUTOMATION_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
 
     private final KnotLinkClient knotLink = new KnotLinkClient();
     private final RestoreSession restoreSession = new RestoreSession();
@@ -88,6 +94,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
         ServerLifecycleEvents.SERVER_STOPPED.register(this::onServerStopped);
         ServerTickEvents.END_SERVER_TICK.register(autoSave::tick);
+        ServerPlayConnectionEvents.JOIN.register(this::onPlayerJoin);
     }
 
     public KnotLinkClient knotLink() {
@@ -97,6 +104,70 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     public void completeClientRestore(boolean success, String reason) {
         operations.completeClientRejoin(success, reason);
         restoreSession.reset();
+    }
+
+    private void onPlayerJoin(
+            net.minecraft.server.network.ServerGamePacketListenerImpl handler,
+            net.fabricmc.fabric.api.networking.v1.PacketSender sender,
+            MinecraftServer server) {
+        ServerPlayer player = handler.player;
+        // Delay 1 second to ensure player is fully loaded
+        coordinator.schedule(
+                () -> server.executeIfPossible(() -> sendAutomationStatusWelcome(player)),
+                1L,
+                TimeUnit.SECONDS);
+    }
+
+    private void sendAutomationStatusWelcome(ServerPlayer player) {
+        CurrentWorldAutomationState state = currentWorldAutomation();
+        if (!state.currentWorldAvailable()) {
+            return;
+        }
+
+        MutableComponent message;
+        if (state.mode() == CurrentWorldAutomationMode.OFF) {
+            // Not enabled: show prompt + [Enable] button
+            message = Component.translatable("minebackup.message.auto.welcome.disabled");
+            message.append(Component.literal(" "));
+            message.append(Component.translatable("minebackup.message.auto.welcome.button.enable")
+                    .withStyle(style -> style
+                            .withColor(ChatFormatting.GREEN)
+                            .withClickEvent(new ClickEvent.SuggestCommand("/mb auto start "))
+                            .withHoverEvent(new HoverEvent.ShowText(
+                                    Component.translatable("minebackup.message.auto.welcome.button.enable.hover")))));
+        } else {
+            // Enabled: show status + [Disable] + [Reconfigure] buttons
+            String modeKey = state.mode() == CurrentWorldAutomationMode.BACKUP
+                    ? "minebackup.message.auto.mode.backup"
+                    : "minebackup.message.auto.mode.remind";
+            long minutes = state.interval().orElseThrow().toMinutes();
+            String nextRun = state.nextRun()
+                    .map(AUTOMATION_TIME_FORMAT::format)
+                    .orElseGet(() -> Component.translatable(
+                            "minebackup.message.auto.status.next_pending").getString());
+
+            message = Component.translatable(
+                    "minebackup.message.auto.welcome.enabled",
+                    Component.translatable(modeKey),
+                    minutes,
+                    nextRun);
+            message.append(Component.literal(" "));
+            message.append(Component.translatable("minebackup.message.auto.welcome.button.disable")
+                    .withStyle(style -> style
+                            .withColor(ChatFormatting.RED)
+                            .withClickEvent(new ClickEvent.RunCommand("/mb auto stop"))
+                            .withHoverEvent(new HoverEvent.ShowText(
+                                    Component.translatable("minebackup.message.auto.welcome.button.disable.hover")))));
+            message.append(Component.literal(" "));
+            message.append(Component.translatable("minebackup.message.auto.welcome.button.config")
+                    .withStyle(style -> style
+                            .withColor(ChatFormatting.YELLOW)
+                            .withClickEvent(new ClickEvent.SuggestCommand("/mb auto start "))
+                            .withHoverEvent(new HoverEvent.ShowText(
+                                    Component.translatable("minebackup.message.auto.welcome.button.config.hover")))));
+        }
+
+        player.sendSystemMessage(message);
     }
 
     private void onServerStarting(MinecraftServer startingServer) {
