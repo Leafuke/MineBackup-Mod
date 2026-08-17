@@ -171,6 +171,14 @@ public final class ClientRejoinController {
         resetRejoinState();
         resetLanReopenState();
         MineBackup.completeClientRestore(false, reason);
+
+        // Show user-friendly error message
+        Component errorMessage = Component.translatable(
+                "minebackup.message.restore.rejoin_error." + reason);
+        if (client.player != null) {
+            client.player.sendSystemMessage(errorMessage);
+        }
+
         try {
             client.gui.setScreen(new SelectWorldScreen(new TitleScreen()));
         } catch (RuntimeException exception) {
