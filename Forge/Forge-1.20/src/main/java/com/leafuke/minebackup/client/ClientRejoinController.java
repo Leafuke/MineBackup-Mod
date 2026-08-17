@@ -76,7 +76,13 @@ public final class ClientRejoinController {
             if (client.player != null) {
                 client.player.sendSystemMessage(message);
             } else {
-                client.setScreen(new GenericDirtMessageScreen(message));
+                // Show the message and provide a way back to the world selection screen
+                try {
+                    client.setScreen(new SelectWorldScreen(new TitleScreen()));
+                } catch (RuntimeException exception) {
+                    MineBackup.LOGGER.warn("Failed to open world selection after restore failure", exception);
+                    client.setScreen(new TitleScreen());
+                }
             }
         });
     }
