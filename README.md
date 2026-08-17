@@ -41,6 +41,8 @@ This lightweight mod is a bridge between the **MineBackup desktop application** 
 * **Rich In-Game Commands**: Use the `/mb` command series to manage world saves directly from chat — backup, restore, browse history, and schedule automatic backups.
 * **Interactive Backup Browser**: `/mb list backups current` pages through your current world's backups right in chat, showing timestamps and comments (parsed automatically from standard backup file names) with a clickable **[Restore]** button next to each entry.
 * **Restore Safety Countdown**: Before a restore actually runs, MineBackup can count down a configurable number of seconds. Use `/mb stop` to cancel or `/mb confirm` to skip ahead and restore immediately.
+* **Smart Automation Welcome**: When you join a world, MineBackup shows you the automation status with clickable buttons — **[Enable Auto Backup]** if disabled, or **[Disable]** and **[Reconfigure]** if already running.
+* **Flexible Automation Modes**: Choose between automatic backups or friendly reminders that let you pick the right moment.
 * **Full Dedicated Server Support**: Backup, restore, and browsing all work the same way on a dedicated server as they do in singleplayer, coordinated through a bundled restart sidecar (see below).
 * **Real-Time Backup Notifications**: Receive real-time messages from the main application in your game chat — whether a backup starts, succeeds, or fails.
 * **Seamless Live Backup Support**: When the main application needs to perform a "live backup" (i.e., while the game is running), this mod automatically triggers a safe, complete world save (equivalent to `/save-all`) in the background, ensuring your backup always captures the latest progress.
@@ -88,11 +90,11 @@ On Fabric 26.1, commands use capability-specific native permission nodes, with O
 | **/mb list folders** | `<config_id>` | Lists the folders tracked under a configuration profile. |
 | **/mb list backups current** | `[page]` | Interactively browses the current world's backups in chat, with a clickable restore button per entry. |
 | **/mb list backups** | `<config_id> <folder>` | Lists backup files for a specific, non-current folder. |
-| **/mb auto start** | `<minutes> [backup\|remind]` | Fabric 26.1: stores a world-bound automatic backup or reminder plan; mode defaults to `backup`. |
-| **/mb auto status** | (none) | Fabric 26.1: shows the current world's mode, interval, and next trigger. |
-| **/mb auto stop** | (none) | Fabric 26.1: stops only the current world's automation plan. |
+| **/mb auto start** | `<minutes> [backup\|remind]` | Stores a world-bound automatic backup or reminder plan; mode defaults to `backup`. |
+| **/mb auto status** | (none) | Shows the current world's mode, interval, and next trigger time. |
+| **/mb auto stop** | (none) | Stops only the current world's automation plan. |
 
-Fabric 26.1 stores automation outside the save, so restoring a world cannot
+Automation plans are stored outside the save, so restoring a world cannot
 restore an obsolete schedule. The `remind` mode is intended for players who
 want to choose a safe moment around unload-sensitive redstone. Full defaults,
 ranges, migration rules, and permission nodes are in the
