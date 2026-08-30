@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class AutoSaveController {
-    private static final long FREEZE_TIMEOUT_NANOS = Duration.ofMinutes(3).toNanos();
+    private static final long FREEZE_TIMEOUT_NANOS = Duration.ofMinutes(10).toNanos();
 
     private final List<ServerLevel> frozenLevels = new ArrayList<>();
     private final Runnable timeoutListener;
