@@ -1,6 +1,7 @@
 package com.leafuke.minebackup.client;
 
 import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.compat.TextEvents;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.restore.RestoreSession;
 import com.leafuke.minebackup.update.UpdateChecker;
@@ -73,13 +74,21 @@ public final class MineBackupClient {
             return;
         }
 
+        ClickEvent clickEvent = TextEvents.openUrl(result.releaseUri());
+        HoverEvent hoverEvent = TextEvents.showText(
+                Component.translatable("minebackup.message.update.hover"));
         MutableComponent message = Component.translatable(
                         "minebackup.message.update.available",
                         result.latestVersion())
-                .withStyle(style -> style
-                        .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, result.releaseUri().toString()))
-                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                Component.translatable("minebackup.message.update.hover"))));
+                .withStyle(style -> {
+                    if (clickEvent != null) {
+                        style = style.withClickEvent(clickEvent);
+                    }
+                    if (hoverEvent != null) {
+                        style = style.withHoverEvent(hoverEvent);
+                    }
+                    return style;
+                });
         client.gui.getChat().addMessage(message);
         updatePromptShown = true;
     }

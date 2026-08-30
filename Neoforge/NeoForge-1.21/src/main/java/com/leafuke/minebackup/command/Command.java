@@ -13,6 +13,7 @@ import com.leafuke.minebackup.api.v2.OperationHandle;
 import com.leafuke.minebackup.api.v2.OperationPhase;
 import com.leafuke.minebackup.api.v2.RestoreRequest;
 import com.leafuke.minebackup.api.v2.RestoreResult;
+import com.leafuke.minebackup.compat.TextEvents;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
@@ -382,24 +383,30 @@ public final class Command {
                     "minebackup.message.list_current_backups.entry_no_comment",
                     row.timestamp().get());
         }
-        return label.withStyle(style -> style.withHoverEvent(new HoverEvent(
-                HoverEvent.Action.SHOW_TEXT,
-                Component.translatable(
-                        "minebackup.message.list_current_backups.file_hover",
-                        row.fileName()))));
+        HoverEvent hoverEvent = TextEvents.showText(Component.translatable(
+                "minebackup.message.list_current_backups.file_hover",
+                row.fileName()));
+        return label.withStyle(style -> hoverEvent == null
+                ? style
+                : style.withHoverEvent(hoverEvent));
     }
 
     private static MutableComponent currentRestoreButton(CurrentBackupListModel.Row row) {
+        ClickEvent clickEvent = TextEvents.runCommand(row.restoreCommand());
+        HoverEvent hoverEvent = TextEvents.showText(Component.translatable(
+                "minebackup.message.list_current_backups.restore_hover",
+                row.fileName()));
         return Component.translatable("minebackup.message.list_current_backups.restore")
-                .withStyle(style -> style
-                        .withColor(ChatFormatting.GREEN)
-                        .withUnderlined(true)
-                        .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, row.restoreCommand()))
-                        .withHoverEvent(new HoverEvent(
-                                HoverEvent.Action.SHOW_TEXT,
-                                Component.translatable(
-                                        "minebackup.message.list_current_backups.restore_hover",
-                                        row.fileName()))));
+                .withStyle(style -> {
+                    style = style.withColor(ChatFormatting.GREEN).withUnderlined(true);
+                    if (clickEvent != null) {
+                        style = style.withClickEvent(clickEvent);
+                    }
+                    if (hoverEvent != null) {
+                        style = style.withHoverEvent(hoverEvent);
+                    }
+                    return style;
+                });
     }
 
     private static MutableComponent pageLink(String translationKey, int targetPage, boolean enabled) {
@@ -408,13 +415,18 @@ public final class Command {
             return link.withStyle(ChatFormatting.DARK_GRAY);
         }
         String command = "/mb list backups current " + targetPage;
-        return link.withStyle(style -> style
-                .withColor(ChatFormatting.AQUA)
-                .withUnderlined(true)
-                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
-                .withHoverEvent(new HoverEvent(
-                        HoverEvent.Action.SHOW_TEXT,
-                        Component.translatable(translationKey))));
+        ClickEvent clickEvent = TextEvents.runCommand(command);
+        HoverEvent hoverEvent = TextEvents.showText(Component.translatable(translationKey));
+        return link.withStyle(style -> {
+            style = style.withColor(ChatFormatting.AQUA).withUnderlined(true);
+            if (clickEvent != null) {
+                style = style.withClickEvent(clickEvent);
+            }
+            if (hoverEvent != null) {
+                style = style.withHoverEvent(hoverEvent);
+            }
+            return style;
+        });
     }
 
     private static int executeListBackups(CommandSourceStack source, String configId, String folder) {

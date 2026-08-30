@@ -4,6 +4,7 @@ import com.leafuke.minebackup.command.Command;
 import com.leafuke.minebackup.api.v2.MineBackupApi;
 import com.leafuke.minebackup.api.v2.CurrentWorldAutomationMode;
 import com.leafuke.minebackup.client.MineBackupClient;
+import com.leafuke.minebackup.compat.TextEvents;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
 import com.leafuke.minebackup.runtime.MineBackupRuntime;
 import com.leafuke.minebackup.runtime.AutoBackupUpdateResult;
@@ -91,12 +92,19 @@ public final class MineBackup {
     }
 
     public static MutableComponent pluginLinkMessage() {
+        ClickEvent clickEvent = TextEvents.openUrl(URI.create(PLUGIN_GUIDE_URL));
+        HoverEvent hoverEvent = TextEvents.showText(
+                Component.translatable("minebackup.message.plugin_link_hover"));
         return Component.translatable("minebackup.message.plugin_link_prefix")
-                .append(Component.literal(PLUGIN_GUIDE_URL).withStyle(style -> style
-                        .withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL,
-                                PLUGIN_GUIDE_URL))
-                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                Component.translatable("minebackup.message.plugin_link_hover")))
-                        .withUnderlined(true)));
+                .append(Component.literal(PLUGIN_GUIDE_URL).withStyle(style -> {
+                    style = style.withUnderlined(true);
+                    if (clickEvent != null) {
+                        style = style.withClickEvent(clickEvent);
+                    }
+                    if (hoverEvent != null) {
+                        style = style.withHoverEvent(hoverEvent);
+                    }
+                    return style;
+                }));
     }
 }

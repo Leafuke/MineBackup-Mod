@@ -21,6 +21,7 @@ import com.leafuke.minebackup.client.ClientHooks;
 import com.leafuke.minebackup.client.RestoreUiMessages;
 import com.leafuke.minebackup.command.CommandCapability;
 import com.leafuke.minebackup.command.CommandPermissions;
+import com.leafuke.minebackup.compat.TextEvents;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.dedicated.DedicatedRestoreManager;
 import com.leafuke.minebackup.knotlink.KnotLinkClient;
@@ -208,9 +209,21 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }
+        MinecraftServer currentServer = server;
+        if (currentServer == null) {
+            return;
+        }
         // Delay 1 second to ensure player is fully loaded
         coordinator.schedule(
-                () -> server.executeIfPossible(() -> sendAutomationStatusWelcome(player)),
+                () -> currentServer.executeIfPossible(() -> {
+                    try {
+                        sendAutomationStatusWelcome(player);
+                    } catch (RuntimeException | LinkageError exception) {
+                        MineBackup.LOGGER.warn(
+                                "Failed to send automation status welcome message; continuing without it.",
+                                exception);
+                    }
+                }),
                 1L,
                 TimeUnit.SECONDS);
     }
@@ -226,12 +239,20 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             // Not enabled: show prompt + [Enable] button
             message = Component.translatable("minebackup.message.auto.welcome.disabled");
             message.append(Component.literal(" "));
+            ClickEvent clickEvent = TextEvents.suggestCommand("/mb auto start ");
+            HoverEvent hoverEvent = TextEvents.showText(
+                    Component.translatable("minebackup.message.auto.welcome.button.enable.hover"));
             message.append(Component.translatable("minebackup.message.auto.welcome.button.enable")
-                    .withStyle(style -> style
-                            .withColor(ChatFormatting.GREEN)
-                            .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/mb auto start "))
-                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                    Component.translatable("minebackup.message.auto.welcome.button.enable.hover")))));
+                    .withStyle(style -> {
+                        style = style.withColor(ChatFormatting.GREEN);
+                        if (clickEvent != null) {
+                            style = style.withClickEvent(clickEvent);
+                        }
+                        if (hoverEvent != null) {
+                            style = style.withHoverEvent(hoverEvent);
+                        }
+                        return style;
+                    }));
         } else {
             // Enabled: show status + [Disable] + [Reconfigure] buttons
             String modeKey = state.mode() == CurrentWorldAutomationMode.BACKUP
@@ -249,19 +270,35 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                     minutes,
                     nextRun);
             message.append(Component.literal(" "));
+            ClickEvent disableClick = TextEvents.runCommand("/mb auto stop");
+            HoverEvent disableHover = TextEvents.showText(
+                    Component.translatable("minebackup.message.auto.welcome.button.disable.hover"));
             message.append(Component.translatable("minebackup.message.auto.welcome.button.disable")
-                    .withStyle(style -> style
-                            .withColor(ChatFormatting.RED)
-                            .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/mb auto stop"))
-                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                    Component.translatable("minebackup.message.auto.welcome.button.disable.hover")))));
+                    .withStyle(style -> {
+                        style = style.withColor(ChatFormatting.RED);
+                        if (disableClick != null) {
+                            style = style.withClickEvent(disableClick);
+                        }
+                        if (disableHover != null) {
+                            style = style.withHoverEvent(disableHover);
+                        }
+                        return style;
+                    }));
             message.append(Component.literal(" "));
+            ClickEvent configClick = TextEvents.suggestCommand("/mb auto start ");
+            HoverEvent configHover = TextEvents.showText(
+                    Component.translatable("minebackup.message.auto.welcome.button.config.hover"));
             message.append(Component.translatable("minebackup.message.auto.welcome.button.config")
-                    .withStyle(style -> style
-                            .withColor(ChatFormatting.YELLOW)
-                            .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/mb auto start "))
-                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                                    Component.translatable("minebackup.message.auto.welcome.button.config.hover")))));
+                    .withStyle(style -> {
+                        style = style.withColor(ChatFormatting.YELLOW);
+                        if (configClick != null) {
+                            style = style.withClickEvent(configClick);
+                        }
+                        if (configHover != null) {
+                            style = style.withHoverEvent(configHover);
+                        }
+                        return style;
+                    }));
         }
 
         player.sendSystemMessage(message);
@@ -1063,11 +1100,19 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     }
 
     private static MutableComponent actionLink(String translationKey, String command) {
-        return Component.translatable(translationKey).withStyle(style -> style
-                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
-                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
-                        Component.translatable(translationKey)))
-                .withUnderlined(true));
+        ClickEvent clickEvent = TextEvents.runCommand(command);
+        HoverEvent hoverEvent = TextEvents.showText(
+                Component.translatable(translationKey));
+        return Component.translatable(translationKey).withStyle(style -> {
+            style = style.withUnderlined(true);
+            if (clickEvent != null) {
+                style = style.withClickEvent(clickEvent);
+            }
+            if (hoverEvent != null) {
+                style = style.withHoverEvent(hoverEvent);
+            }
+            return style;
+        });
     }
 
     private void broadcastAutomationReminder() {
