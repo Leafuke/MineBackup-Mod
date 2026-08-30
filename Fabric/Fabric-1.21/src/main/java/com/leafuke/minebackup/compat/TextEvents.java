@@ -31,6 +31,15 @@ public final class TextEvents {
                 command);
     }
 
+    public static ClickEvent suggestCommand(String command) {
+        return createClickEvent(
+                "SUGGEST_COMMAND",
+                String.class,
+                command,
+                String.class,
+                command);
+    }
+
     public static ClickEvent openUrl(URI uri) {
         return createClickEvent(
                 "OPEN_URL",
