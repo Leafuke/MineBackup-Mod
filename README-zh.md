@@ -1,5 +1,5 @@
 ![Forge Version](https://img.shields.io/badge/Forge-1.20-blue?logo=minecraft)
-![Fabric Version](https://img.shields.io/badge/Fabric-1.21%20~%2026.2-blue?logo=minecraft)
+![Fabric Version](https://img.shields.io/badge/Fabric-1.21%20~%2026.3-blue?logo=minecraft)
 ![Neoforge Version](https://img.shields.io/badge/Neoforge-1.21%20~%2026.1-blue?logo=minecraft)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 [![English README](https://img.shields.io/badge/README-English-blue)](README.md)
