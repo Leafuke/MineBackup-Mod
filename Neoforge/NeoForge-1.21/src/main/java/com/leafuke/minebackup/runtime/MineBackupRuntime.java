@@ -1020,6 +1020,25 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     }
 
     @Override
+    public CompletionStage<com.leafuke.minebackup.api.v2.BackendCapabilitiesResult> backendCapabilities(
+            com.leafuke.minebackup.api.v2.BackendCapabilitiesRequest request) {
+        java.util.Objects.requireNonNull(request, "request");
+        MinecraftServer origin = server;
+        if (origin == null || !operationsAvailable) return CompletableFuture.completedFuture(
+                com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.unavailable(
+                        com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.Outcome.UNAVAILABLE, "No active Minecraft server"));
+        return knotLink.query(KnotLinkRequest.command("GET_CAPABILITIES")).handle((response, error) -> {
+            var failed = com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.Outcome.FAILED;
+            if (server != origin || !operationsAvailable) return com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.unavailable(
+                    com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.Outcome.UNAVAILABLE, "Originating world closed");
+            if (error != null || response == null || !response.isOk()) return com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.unavailable(
+                    failed, error != null ? "Backend communication failed" : "Backend rejected capability discovery");
+            try { return BackendCapabilitiesParser.parse(response.fields().get("func_list")); }
+            catch (RuntimeException malformed) { return com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.unavailable(failed, "Invalid capability manifest"); }
+        });
+    }
+
+    @Override
     public RuntimeStatus runtimeStatus() {
         RuntimeEnvironment environment = server == null
                 ? RuntimeEnvironment.NONE

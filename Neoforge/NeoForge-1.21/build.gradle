@@ -15,6 +15,19 @@ tasks.named('wrapper', Wrapper).configure {
 }
 
 version = mod_version
+sourceSets {
+    capabilityTest {
+        java.srcDir 'tests/java'
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += output + compileClasspath
+    }
+}
+tasks.register('testBackendCapabilities', JavaExec) {
+    dependsOn tasks.named('capabilityTestClasses')
+    classpath = sourceSets.capabilityTest.runtimeClasspath
+    mainClass = 'com.leafuke.minebackup.runtime.BackendCapabilitiesParserTest'
+}
+tasks.named('check') { dependsOn tasks.named('testBackendCapabilities') }
 group = mod_group_id
 
 repositories {

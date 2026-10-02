@@ -23,6 +23,13 @@ public interface MineBackupApi {
 
     RuntimeStatus runtimeStatus();
 
+    default CompletionStage<BackendCapabilitiesResult> backendCapabilities(BackendCapabilitiesRequest request) {
+        java.util.Objects.requireNonNull(request, "request");
+        return java.util.concurrent.CompletableFuture.completedFuture(
+                BackendCapabilitiesResult.unavailable(BackendCapabilitiesResult.Outcome.UNSUPPORTED,
+                        "This MineBackup implementation does not expose backend capabilities"));
+    }
+
     default CurrentWorldAutomationState currentWorldAutomation() {
         RuntimeStatus status = runtimeStatus();
         if (!status.currentWorldAvailable()) {
