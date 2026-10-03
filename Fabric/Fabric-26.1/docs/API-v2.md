@@ -117,3 +117,13 @@ api.listCurrentBackups(BackupCatalogRequest.create("time_machine:browser"))
 
 Catalog order is undefined under the current protocol. Integrations should sort
 for display and tolerate absent time, size, and comment metadata.
+
+## MineBackup 3.4.0 compatible additions
+
+All eight maintained mod builds expose `backendCapabilities`, `backendStatus`, and `cancelRestore`. `API_VERSION` stays 2 and existing public record constructors are unchanged. New methods have `UNSUPPORTED` defaults so older implementations remain loadable.
+
+Backend queries are read-only and bypass the operation gate. Their origin must still be an active world when the reply arrives. Capability declarations and communication observations do not establish plugin or current-world readiness. Status fields are optional, and signal-channel connectivity is independent from query success.
+
+`cancelRestore(RestoreCancelRequest.create(callerId, operationUuid))` atomically cancels a matching restore only in `COUNTING_DOWN`. UUID possession is sufficient; callerId is attribution, not ownership. The result is `CANCELLED`, `NOT_PENDING`, `ALREADY_SUBMITTED`, or `UNSUPPORTED`. Cancellation never stops a submitted backend restore. Administrators retain the existing `/mb stop` behavior.
+
+See [backend diagnostics and cancellation examples](BACKEND-CAPABILITIES.md) for contracts and migration notes. `OperationFailure.message()` retains technical detail; user interfaces should localize the structured code. An addon requiring these newly added types needs MineBackup >=3.4.0 or explicit legacy linkage handling.

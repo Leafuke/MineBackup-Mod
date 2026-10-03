@@ -1,6 +1,9 @@
 package com.leafuke.minebackup.knotlink;
 
 import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.api.v2.BackendStatusResult;
+import com.leafuke.minebackup.api.v2.OperationFailure;
+import java.util.concurrent.TimeoutException;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkCodec;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkProtocolException;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
@@ -50,8 +53,43 @@ public final class KnotLinkClient implements AutoCloseable {
                     daemonThreadFactory("minebackup-knotlink-reconnect-"));
     private final Object subscriberLock = new Object();
 
+    @FunctionalInterface
+    interface Connector { OpenSocketQuerier connect() throws IOException; }
+    private final Connector connector;
+    private final String host;
+    private final int queryPort;
+    private final int connectTimeoutMillis;
+    private final int responseTimeoutMillis;
+    private final java.util.Set<CompletableFuture<KnotLinkResponse>> pendingQueries =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public KnotLinkClient() {
+        this(HOST, QUERY_PORT, CONNECT_TIMEOUT_MILLIS, RESPONSE_TIMEOUT_MILLIS);
+    }
+
+    // Package-private transport seam for controlled loopback tests; production endpoints stay fixed.
+    KnotLinkClient(String host, int queryPort, int connectTimeoutMillis, int responseTimeoutMillis) {
+        this(host, queryPort, connectTimeoutMillis, responseTimeoutMillis, null);
+    }
+
+    KnotLinkClient(Connector connector) {
+        this(HOST, QUERY_PORT, CONNECT_TIMEOUT_MILLIS, RESPONSE_TIMEOUT_MILLIS,
+                Objects.requireNonNull(connector, "connector"));
+    }
+
+    private KnotLinkClient(String host, int queryPort, int connectTimeoutMillis,
+            int responseTimeoutMillis, Connector connector) {
+        this.host = Objects.requireNonNull(host, "host");
+        this.queryPort = queryPort;
+        this.connectTimeoutMillis = connectTimeoutMillis;
+        this.responseTimeoutMillis = responseTimeoutMillis;
+        this.connector = connector != null ? connector : () -> new OpenSocketQuerier(APP_ID, OPEN_SOCKET_ID,
+                this.host, this.queryPort, this.connectTimeoutMillis, MAX_RESPONSE_BYTES);
+    }
+
     private volatile boolean closed;
     private boolean subscriberRunning;
+    private BackendStatusResult.ChannelState signalState = BackendStatusResult.ChannelState.UNKNOWN;
     private int reconnectDelaySeconds = 1;
     private SignalSubscriber subscriber;
     private Consumer<Map<String, String>> signalListener;
@@ -60,19 +98,27 @@ public final class KnotLinkClient implements AutoCloseable {
         Objects.requireNonNull(request, "request");
         if (closed) {
             return CompletableFuture.failedFuture(
-                    new IllegalStateException("KnotLink client is closed"));
+                    new KnotLinkCommunicationException(OperationFailure.Code.CLIENT_CLOSED,
+                            "KnotLink client is closed", null));
         }
 
         try {
-            return CompletableFuture.supplyAsync(() -> {
+            CompletableFuture<KnotLinkResponse> future = CompletableFuture.supplyAsync(() -> {
                 try {
                     return queryBlocking(request);
                 } catch (Exception exception) {
                     throw new CompletionException(exception);
                 }
             }, queryExecutor);
+            pendingQueries.add(future);
+            future.whenComplete((response, error) -> pendingQueries.remove(future));
+            if (closed) future.completeExceptionally(new KnotLinkCommunicationException(
+                    OperationFailure.Code.CLIENT_CLOSED, "KnotLink client is closed", null));
+            return future;
         } catch (RejectedExecutionException exception) {
-            return CompletableFuture.failedFuture(exception);
+            return CompletableFuture.failedFuture(new KnotLinkCommunicationException(
+                    closed ? OperationFailure.Code.CLIENT_CLOSED : OperationFailure.Code.QUERY_QUEUE_FULL,
+                    "KnotLink query executor rejected a task", exception));
         }
     }
 
@@ -84,6 +130,7 @@ public final class KnotLinkClient implements AutoCloseable {
                 return;
             }
             subscriberRunning = true;
+            signalState = BackendStatusResult.ChannelState.UNKNOWN;
             reconnectDelaySeconds = 1;
         }
         scheduleSubscriberConnect(0);
@@ -93,6 +140,7 @@ public final class KnotLinkClient implements AutoCloseable {
         SignalSubscriber current;
         synchronized (subscriberLock) {
             subscriberRunning = false;
+            signalState = BackendStatusResult.ChannelState.UNKNOWN;
             signalListener = null;
             current = subscriber;
             subscriber = null;
@@ -102,24 +150,53 @@ public final class KnotLinkClient implements AutoCloseable {
         }
     }
 
+    public BackendStatusResult.ChannelState signalChannelState() {
+        synchronized (subscriberLock) {
+            if (closed || !subscriberRunning) return BackendStatusResult.ChannelState.UNKNOWN;
+            if (subscriber != null && subscriber.isRunning()) return BackendStatusResult.ChannelState.CONNECTED;
+            return signalState == BackendStatusResult.ChannelState.CONNECTED
+                    ? BackendStatusResult.ChannelState.UNREACHABLE : signalState;
+        }
+    }
+
     private KnotLinkResponse queryBlocking(KnotLinkRequest request) throws Exception {
-        try (OpenSocketQuerier querier = new OpenSocketQuerier(
-                APP_ID,
-                OPEN_SOCKET_ID,
-                HOST,
-                QUERY_PORT,
-                CONNECT_TIMEOUT_MILLIS,
-                MAX_RESPONSE_BYTES)) {
-            String payload = querier.query(
-                    request.serialize(),
-                    RESPONSE_TIMEOUT_MILLIS,
-                    TimeUnit.MILLISECONDS);
-            int responseBytes = payload.getBytes(StandardCharsets.UTF_8).length;
-            if (responseBytes > MAX_RESPONSE_BYTES) {
-                throw new IOException(
-                        "KnotLink response exceeds " + MAX_RESPONSE_BYTES + " bytes");
+        if (closed) throw new KnotLinkCommunicationException(OperationFailure.Code.CLIENT_CLOSED,
+                "KnotLink client is closed", null);
+        OpenSocketQuerier connected;
+        try {
+            connected = connector.connect();
+        } catch (IOException exception) {
+            throw new KnotLinkCommunicationException(closed ? OperationFailure.Code.CLIENT_CLOSED
+                    : OperationFailure.Code.KNOTLINK_UNREACHABLE,
+                    "Cannot connect to the KnotLink query service", exception);
+        }
+        try (OpenSocketQuerier querier = connected) {
+            String payload;
+            try {
+                payload = querier.query(request.serialize(), responseTimeoutMillis, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException timeout) {
+                throw new KnotLinkCommunicationException(OperationFailure.Code.RESPONSE_TIMEOUT,
+                        "Backend did not respond before the query deadline", timeout);
+            } catch (Exception error) {
+                OperationFailure failure = KnotLinkCommunicationException.failure(error);
+                throw new KnotLinkCommunicationException(
+                        closed ? OperationFailure.Code.CLIENT_CLOSED : failure.code() == OperationFailure.Code.PROTOCOL_ERROR
+                                ? OperationFailure.Code.PROTOCOL_ERROR : OperationFailure.Code.CONNECTION_CLOSED,
+                        "KnotLink query failed after connecting", error);
             }
-            return KnotLinkResponse.parse(payload);
+            if ("offline".equals(payload)) {
+                throw new KnotLinkCommunicationException(OperationFailure.Code.BACKEND_OFFLINE,
+                        "KnotLink has no registered backend responder", null);
+            }
+            try {
+                if (payload.getBytes(StandardCharsets.UTF_8).length > MAX_RESPONSE_BYTES) {
+                    throw new KnotLinkProtocolException("Oversized KnotLink response");
+                }
+                return KnotLinkResponse.parse(payload);
+            } catch (KnotLinkProtocolException malformed) {
+                throw new KnotLinkCommunicationException(OperationFailure.Code.PROTOCOL_ERROR,
+                        "Invalid backend protocol response", malformed);
+            }
         }
     }
 
@@ -165,6 +242,7 @@ public final class KnotLinkClient implements AutoCloseable {
                 active = subscriber == candidate && subscriberRunning && !closed;
                 if (active) {
                     reconnectDelaySeconds = 1;
+                    signalState = BackendStatusResult.ChannelState.CONNECTED;
                 }
             }
             if (active) {
@@ -212,6 +290,8 @@ public final class KnotLinkClient implements AutoCloseable {
                 return false;
             }
             subscriber = null;
+            signalState = subscriberRunning && !closed
+                    ? BackendStatusResult.ChannelState.UNREACHABLE : BackendStatusResult.ChannelState.UNKNOWN;
             return subscriberRunning && !closed;
         }
     }
@@ -265,6 +345,7 @@ public final class KnotLinkClient implements AutoCloseable {
             }
             closed = true;
             subscriberRunning = false;
+            signalState = BackendStatusResult.ChannelState.UNKNOWN;
             signalListener = null;
             current = subscriber;
             subscriber = null;
@@ -273,6 +354,8 @@ public final class KnotLinkClient implements AutoCloseable {
             current.stop();
         }
         reconnectExecutor.shutdownNow();
+        pendingQueries.forEach(future -> future.completeExceptionally(new KnotLinkCommunicationException(
+                OperationFailure.Code.CLIENT_CLOSED, "KnotLink client is closed", null)));
         queryExecutor.shutdownNow();
     }
 

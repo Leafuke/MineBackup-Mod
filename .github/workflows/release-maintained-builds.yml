@@ -26,7 +26,6 @@ jobs:
 
           files=(
             "Fabric/Fabric-1.21/gradle.properties"
-            "Fabric/Fabric-1.21.9/gradle.properties"
             "Fabric/Fabric-1.21.11/gradle.properties"
             "Fabric/Fabric-26.1/gradle.properties"
             "Fabric/Fabric-26.2/gradle.properties"
@@ -76,11 +75,6 @@ jobs:
             minecraft: 1.21
             java: '21'
             project_dir: Fabric/Fabric-1.21
-          - id: fabric-1.21.9
-            loader: fabric
-            minecraft: 1.21.9
-            java: '21'
-            project_dir: Fabric/Fabric-1.21.9
           - id: fabric-1.21.11
             loader: fabric
             minecraft: 1.21.11
@@ -190,22 +184,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
           RELEASE_NAME: ${{ needs.preflight.outputs.release_name }}
+          RELEASE_NOTES_FILE: RELEASE-${{ needs.preflight.outputs.mod_version }}.md
         shell: bash
         run: |
           set -euo pipefail
+
+          (cd release-assets && sha256sum *.jar > SHA256SUMS)
+          notes_args=()
+          if [ -f "$RELEASE_NOTES_FILE" ]; then
+            notes_args=(--notes-file "$RELEASE_NOTES_FILE")
+          fi
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $RELEASE_TAG already exists. Refreshing assets."
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$RELEASE_NAME" \
-              --target "$GITHUB_SHA"
+              --target "$GITHUB_SHA" "${notes_args[@]}"
           else
+            if [ "${#notes_args[@]}" -eq 0 ]; then
+              notes_args=(--generate-notes)
+            fi
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$RELEASE_NAME" \
               --target "$GITHUB_SHA" \
-              --generate-notes
+              "${notes_args[@]}"
           fi
 
-          gh release upload "$RELEASE_TAG" release-assets/*.jar --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" release-assets/*.jar release-assets/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber

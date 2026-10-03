@@ -27,7 +27,15 @@ tasks.register('testBackendCapabilities', JavaExec) {
     classpath = sourceSets.capabilityTest.runtimeClasspath
     mainClass = 'com.leafuke.minebackup.runtime.BackendCapabilitiesParserTest'
 }
-tasks.named('check') { dependsOn tasks.named('testBackendCapabilities') }
+tasks.register('testBackendDiagnostics', JavaExec) {
+    dependsOn tasks.named('capabilityTestClasses')
+    classpath = sourceSets.capabilityTest.runtimeClasspath
+    mainClass = 'com.leafuke.minebackup.runtime.BackendDiagnosticsContractTest'
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('testBackendCapabilities'), tasks.named('testBackendDiagnostics')
+}
 group = mod_group_id
 
 repositories {

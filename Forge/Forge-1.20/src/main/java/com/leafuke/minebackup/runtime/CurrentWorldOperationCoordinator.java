@@ -15,6 +15,9 @@ import com.leafuke.minebackup.api.v2.RestoreExecutionPolicy;
 import com.leafuke.minebackup.api.v2.RestoreRequest;
 import com.leafuke.minebackup.api.v2.RestoreResult;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
+import com.leafuke.minebackup.knotlink.KnotLinkCommunicationException;
+import com.leafuke.minebackup.api.v2.RestoreCancelRequest;
+import com.leafuke.minebackup.api.v2.RestoreCancelResult;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 
 import java.time.Duration;
@@ -144,7 +147,6 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
 
             seconds = request.executionPolicy() == RestoreExecutionPolicy.IMMEDIATE
                     ? 0
-                    // Math.clamp is Java 21+; 1.20 targets Java 17.
                     : Math.max(0, Math.min(300, configuredCountdownSeconds.getAsInt()));
             OperationPhase initial = seconds == 0
                     ? OperationPhase.SUBMITTING
@@ -232,9 +234,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                     if (error != null) {
                         result = BackupCatalogResult.failed(
                                 BackupCatalogResult.Outcome.FAILED,
-                                new OperationFailure(
-                                        OperationFailure.Code.COMMUNICATION_ERROR,
-                                        safeMessage(error.getMessage(), OperationFailure.Code.COMMUNICATION_ERROR)));
+                                KnotLinkCommunicationException.failure(error));
                     } else if (!response.isOk()) {
                         result = BackupCatalogResult.failed(
                                 BackupCatalogResult.Outcome.FAILED,
@@ -398,7 +398,8 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
     private void submitBackup(BackupOperationHandle handle, KnotLinkRequest command) {
         knotLink.query(command).whenComplete((response, error) -> {
             if (error != null) {
-                failBackup(handle, OperationFailure.Code.COMMUNICATION_ERROR, error.getMessage());
+                OperationFailure failure = KnotLinkCommunicationException.failure(error);
+                failBackup(handle, failure.code(), failure.message());
             } else if (!response.isOk()) {
                 failBackup(handle, OperationFailure.Code.BACKEND_REJECTED, response.displayMessage());
             } else {
@@ -409,7 +410,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
 
     private void submitRestore(RestoreOperationHandle handle) {
         synchronized (this) {
-            if (active != handle || handle.phase().isTerminal()) {
+            if (active != handle || handle.phase().isTerminal() || !handle.claimSubmission()) {
                 return;
             }
             if (handle.phase() == OperationPhase.COUNTING_DOWN) {
@@ -427,7 +428,8 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         handle.request().parameters().forEach(command::field);
         knotLink.query(command).whenComplete((response, error) -> {
             if (error != null) {
-                failRestore(handle, OperationFailure.Code.COMMUNICATION_ERROR, error.getMessage());
+                OperationFailure failure = KnotLinkCommunicationException.failure(error);
+                failRestore(handle, failure.code(), failure.message());
             } else if (!response.isOk()) {
                 failRestore(handle, OperationFailure.Code.BACKEND_REJECTED, response.displayMessage());
             } else {
@@ -440,7 +442,8 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         int remaining;
         boolean expired;
         synchronized (this) {
-            if (active != handle || handle.phase() != OperationPhase.COUNTING_DOWN) {
+            if (active != handle) return;
+            if (handle.phase() != OperationPhase.COUNTING_DOWN) {
                 cancelCountdownLocked();
                 return;
             }
@@ -466,36 +469,46 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             if (handle.phase() != OperationPhase.COUNTING_DOWN) {
                 return RestoreControlResult.ALREADY_SUBMITTED;
             }
+            handle.transition(OperationPhase.SUBMITTING);
+            cancelCountdownLocked();
         }
         countdownListener.onConfirmed(handle);
         submitRestore(handle);
         return RestoreControlResult.CONFIRMED;
     }
 
+    RestoreCancelResult cancelRestore(RestoreCancelRequest request) {
+        Objects.requireNonNull(request, "request");
+        return switch (cancelMatching(request.requestId())) {
+            case CANCELLED -> RestoreCancelResult.CANCELLED;
+            case ALREADY_SUBMITTED -> RestoreCancelResult.ALREADY_SUBMITTED;
+            default -> RestoreCancelResult.NOT_PENDING;
+        };
+    }
+
     private RestoreControlResult cancel(RestoreOperationHandle handle) {
-        boolean cancelled;
+        return cancelMatching(handle.id());
+    }
+
+    private RestoreControlResult cancelMatching(UUID requestId) {
+        RestoreOperationHandle handle;
         synchronized (this) {
-            if (active != handle) {
+            if (!(active instanceof RestoreOperationHandle restore) || !restore.id().equals(requestId)) {
                 return RestoreControlResult.NOT_PENDING;
             }
+            handle = restore;
+            if (handle.phase().isTerminal()) return RestoreControlResult.NOT_PENDING;
             if (handle.phase() != OperationPhase.COUNTING_DOWN) {
                 return RestoreControlResult.ALREADY_SUBMITTED;
             }
             cancelCountdownLocked();
-            RestoreResult result = new RestoreResult(
-                    RestoreResult.Outcome.CANCELLED,
-                    handle.request().backupId(),
-                    Optional.empty());
-            cancelled = handle.finish(OperationPhase.CANCELLED, result);
-            if (cancelled) {
-                active = null;
-            }
+            // Release before completing: a completion callback may immediately submit another request.
+            active = null;
+            handle.finish(OperationPhase.CANCELLED, new RestoreResult(
+                    RestoreResult.Outcome.CANCELLED, handle.request().backupId(), Optional.empty()));
         }
-        if (cancelled) {
-            countdownListener.onCancelled(handle);
-            return RestoreControlResult.CANCELLED;
-        }
-        return RestoreControlResult.NOT_PENDING;
+        countdownListener.onCancelled(handle);
+        return RestoreControlResult.CANCELLED;
     }
 
     private Duration remaining(RestoreOperationHandle handle) {

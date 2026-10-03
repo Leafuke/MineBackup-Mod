@@ -74,5 +74,7 @@ replay_*.log
 /Death-Rewind/
 /DeathRewind/
 /MineBackupPlugin/
+/TimeCapsule-Shell/
+/Time-Machine/
 /.agents/
 /.claude/

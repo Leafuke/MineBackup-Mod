@@ -1,6 +1,8 @@
 package com.leafuke.minebackup.runtime;
 
 import com.leafuke.minebackup.MineBackup;
+import com.leafuke.minebackup.command.FailureMessages;
+import com.leafuke.minebackup.knotlink.KnotLinkCommunicationException;
 import com.leafuke.minebackup.ModInfo;
 import com.leafuke.minebackup.api.v2.AutoBackupState;
 import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
@@ -450,16 +452,20 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                             var presentation = operations.activePresentation();
                             autoSave.unfreeze();
                             operations.failActiveBackup(
-                                    OperationFailure.Code.BACKEND_REJECTED,
+                                    error == null ? OperationFailure.Code.BACKEND_REJECTED
+                                            : KnotLinkCommunicationException.failure(error).code(),
                                     error == null
                                             ? response.displayMessage()
                                             : error.getMessage());
                             feedback.optional(
                                     presentation,
                                     MessageSlot.BACKUP_FAILED,
-                                    Component.translatable("minebackup.broadcast.hot_backup.ack_failed"),
+                                    Component.translatable("minebackup.broadcast.hot_backup.ack_failed",
+                                            error == null ? FailureMessages.message(OperationFailure.Code.BACKEND_REJECTED)
+                                                    : FailureMessages.message(error)),
                                     "current_save",
-                                    error == null ? response.displayMessage() : error.getMessage());
+                                    error == null ? FailureMessages.message(OperationFailure.Code.BACKEND_REJECTED)
+                                            : FailureMessages.message(error));
                         });
                     });
         });
@@ -762,7 +768,10 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                 firstNonBlank(fields.get("world"), fields.get("folder")),
                 "minebackup.message.unknown_world");
         Component file = literalOrUnknown(fields.get("file"), "minebackup.message.unknown_file");
-        Component error = literalOrUnknown(fields.get("error"), "minebackup.message.unknown_error");
+        Component error = FailureMessages.message(OperationFailure.Code.BACKEND_REJECTED);
+        if (fields.get("error") != null || "backup_failed".equals(event) || "restore_failed".equals(event)) {
+            MineBackup.LOGGER.warn("Backend event {} failed: {}", event, fields);
+        }
         Component message = switch (event) {
             case "backup_started" -> Component.translatable("minebackup.broadcast.backup.started", world);
             case "backup_success" -> Component.translatable("minebackup.broadcast.backup.success", world, file);
@@ -988,6 +997,34 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         return operations.listCurrentBackups(request);
     }
 
+    private BackendQueries backendQueries() {
+        return new BackendQueries(knotLink::query, () -> operationsAvailable ? server : null,
+                knotLink::signalChannelState);
+    }
+
+    @Override
+    public CompletionStage<com.leafuke.minebackup.api.v2.BackendCapabilitiesResult> backendCapabilities(
+            com.leafuke.minebackup.api.v2.BackendCapabilitiesRequest request) {
+        java.util.Objects.requireNonNull(request, "request");
+        return backendQueries().capabilities();
+    }
+
+    @Override
+    public CompletionStage<com.leafuke.minebackup.api.v2.BackendStatusResult> backendStatus(
+            com.leafuke.minebackup.api.v2.BackendStatusRequest request) {
+        java.util.Objects.requireNonNull(request, "request");
+        return backendQueries().status();
+    }
+
+    @Override
+    public com.leafuke.minebackup.api.v2.RestoreCancelResult cancelRestore(
+            com.leafuke.minebackup.api.v2.RestoreCancelRequest request) {
+        var result = operations.cancelRestore(request);
+        MineBackup.LOGGER.debug("Restore cancellation by {} for {}: {}",
+                request.callerId(), request.requestId(), result);
+        return result;
+    }
+
     @Override
     public RuntimeStatus runtimeStatus() {
         RuntimeEnvironment environment = server == null
@@ -1053,7 +1090,8 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             @Override
             public void onCancelled(InternalRestoreHandle handle) {
                 feedback.optional(
-                        operations.activePresentation(),
+                        handle instanceof RestoreOperationHandle restore ? restore.request().presentation()
+                                : com.leafuke.minebackup.api.v2.OperationPresentation.defaults(),
                         MessageSlot.RESTORE_CANCEL,
                         Component.translatable("minebackup.message.restore.countdown.cancelled"));
             }
@@ -1197,12 +1235,15 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                         }
                         restoreSession.reset();
                         operations.failActiveRestore(
-                                OperationFailure.Code.BACKEND_REJECTED,
+                                error == null ? OperationFailure.Code.BACKEND_REJECTED
+                                        : KnotLinkCommunicationException.failure(error).code(),
                                 error == null
                                         ? response.displayMessage()
                                         : error.getMessage());
                         ClientHooks.restoreFailed(Component.translatable(
-                                "minebackup.message.restore.ack_failed"));
+                                "minebackup.message.restore.ack_failed",
+                                error == null ? FailureMessages.message(OperationFailure.Code.BACKEND_REJECTED)
+                                        : FailureMessages.message(error)));
                     });
         }
 

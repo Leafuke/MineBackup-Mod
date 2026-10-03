@@ -24,6 +24,12 @@ public record OperationFailure(Code code, String message) {
         WORLD_RELEASE_TIMEOUT,
         PROTOCOL_ERROR,
         RESTART_SCRIPT_FAILED,
-        CROSS_PROCESS_STATE_UNCERTAIN
+        CROSS_PROCESS_STATE_UNCERTAIN,
+        KNOTLINK_UNREACHABLE,
+        BACKEND_OFFLINE,
+        RESPONSE_TIMEOUT,
+        CONNECTION_CLOSED,
+        CLIENT_CLOSED,
+        QUERY_QUEUE_FULL
     }
 }

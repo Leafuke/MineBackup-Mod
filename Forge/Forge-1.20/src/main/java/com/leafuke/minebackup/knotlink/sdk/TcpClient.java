@@ -257,7 +257,7 @@ public final class TcpClient implements AutoCloseable {
             magic[0] = (byte) firstByte;
             readFully(currentInput, magic, 1, magic.length - 1);
             if (!Arrays.equals(magic, MAGIC)) {
-                throw new IOException("Invalid KnotLink 2.0 magic header");
+                throw new KnotLinkFrameException("Invalid KnotLink 2.0 magic header");
             }
             byte[] lengthBytes = new byte[LENGTH_BYTES];
             readFully(currentInput, lengthBytes, 0, lengthBytes.length);
@@ -270,7 +270,7 @@ public final class TcpClient implements AutoCloseable {
         }
 
         if (length <= 0 || length > maxMessageBytes) {
-            throw new IOException("Invalid KnotLink message length: " + length);
+            throw new KnotLinkFrameException("Invalid KnotLink message length: " + length);
         }
         byte[] message = new byte[length];
         readFully(currentInput, message, 0, message.length);
@@ -297,7 +297,7 @@ public final class TcpClient implements AutoCloseable {
                     .decode(ByteBuffer.wrap(value))
                     .toString();
         } catch (CharacterCodingException exception) {
-            throw new IOException("KnotLink frame is not valid UTF-8", exception);
+            throw new KnotLinkFrameException("KnotLink frame is not valid UTF-8", exception);
         }
     }
 

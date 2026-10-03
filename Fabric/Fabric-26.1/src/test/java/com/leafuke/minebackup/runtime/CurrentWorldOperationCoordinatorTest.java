@@ -295,6 +295,104 @@ class CurrentWorldOperationCoordinatorTest {
                 () -> AutoBackupScheduler.validateInterval(Duration.ZERO));
     }
 
+    @Test
+    void uuidCancellationIsAtomicAndDoesNotRequireCallerOwnership() throws Exception {
+        var coordinator = coordinator();
+        var restore = coordinator.restoreCurrent(RestoreRequest.latest("owner"));
+        assertEquals(com.leafuke.minebackup.api.v2.RestoreCancelResult.NOT_PENDING,
+                coordinator.cancelRestore(com.leafuke.minebackup.api.v2.RestoreCancelRequest.create("other", UUID.randomUUID())));
+        assertEquals(com.leafuke.minebackup.api.v2.RestoreCancelResult.CANCELLED,
+                coordinator.cancelRestore(com.leafuke.minebackup.api.v2.RestoreCancelRequest.create("other", restore.id())));
+        assertEquals(RestoreResult.Outcome.CANCELLED, restore.completion().toCompletableFuture().get().outcome());
+        assertEquals(com.leafuke.minebackup.api.v2.RestoreCancelResult.NOT_PENDING,
+                coordinator.cancelRestore(com.leafuke.minebackup.api.v2.RestoreCancelRequest.create("other", restore.id())));
+        assertTrue(gateway.requests.isEmpty());
+        var backup = coordinator.backupCurrent(BackupRequest.create("backup"));
+        assertEquals(com.leafuke.minebackup.api.v2.RestoreCancelResult.NOT_PENDING,
+                coordinator.cancelRestore(com.leafuke.minebackup.api.v2.RestoreCancelRequest.create("other", backup.id())));
+        coordinator.close();
+    }
+
+    @Test
+    void immediateOrSubmittedRestoreCannotBeCancelled() {
+        for (boolean immediate : new boolean[] {true, false}) {
+            var coordinator = coordinator();
+            var restore = coordinator.restoreCurrent(immediate ? RestoreRequest.latest("owner").immediate() : RestoreRequest.latest("owner"));
+            if (!immediate) restore.confirm();
+            assertEquals(com.leafuke.minebackup.api.v2.RestoreCancelResult.ALREADY_SUBMITTED,
+                    coordinator.cancelRestore(com.leafuke.minebackup.api.v2.RestoreCancelRequest.create("other", restore.id())));
+            coordinator.close();
+        }
+    }
+
+    @Test
+    void cancellationCompletionCanImmediatelyStartAnotherOperation() {
+        var coordinator = coordinator();
+        var restore = coordinator.restoreCurrent(RestoreRequest.latest("owner"));
+        var next = new java.util.concurrent.atomic.AtomicReference<com.leafuke.minebackup.api.v2.OperationHandle<BackupResult>>();
+        restore.completion().thenRun(() -> next.set(coordinator.backupCurrent(BackupRequest.create("callback"))));
+        coordinator.cancelRestore(com.leafuke.minebackup.api.v2.RestoreCancelRequest.create("other", restore.id()));
+        assertEquals(next.get().id(), coordinator.activeSnapshot().orElseThrow().requestId());
+        assertEquals(OperationPhase.RUNNING, next.get().phase());
+        coordinator.close();
+    }
+
+    @Test
+    void cancellationRacingExpiryHasExactlyOneWinnerAndConfirmationCannotDoubleSubmit() throws Exception {
+        var workers = Executors.newFixedThreadPool(2);
+        try (var clockScheduler = new CapturingScheduler()) {
+            for (int i = 0; i < 60; i++) {
+                var clock = new java.util.concurrent.atomic.AtomicLong(0);
+                var events = new RecordingCountdownListener();
+                var localGateway = new FakeGateway();
+                var coordinator = new CurrentWorldOperationCoordinator(localGateway, clockScheduler,
+                        () -> true, () -> false, () -> 10, events, clock::get);
+                var restore = coordinator.restoreCurrent(RestoreRequest.latest("owner"));
+                Runnable expiry = clockScheduler.tick;
+                clock.set(Duration.ofSeconds(11).toNanos());
+                var start = new java.util.concurrent.CountDownLatch(1);
+                boolean confirm = i % 2 == 0;
+                var first = workers.submit(() -> { start.await();
+                    if (confirm) restore.confirm();
+                    else coordinator.cancelRestore(com.leafuke.minebackup.api.v2.RestoreCancelRequest.create("other", restore.id()));
+                    return null;
+                });
+                var second = workers.submit(() -> { start.await(); expiry.run(); return null; });
+                start.countDown(); first.get(2, TimeUnit.SECONDS); second.get(2, TimeUnit.SECONDS);
+                assertEquals(1, events.cancelled + events.submitted);
+                assertEquals(events.submitted, localGateway.requests.size());
+                coordinator.close();
+            }
+        } finally { workers.shutdownNow(); }
+    }
+
+    @Test
+    void backendQueriesDoNotOccupyOrReplaceAnActiveBackup() throws Exception {
+        var coordinator = coordinator();
+        var backup = coordinator.backupCurrent(BackupRequest.create("active"));
+        var queries = new BackendQueries(request -> CompletableFuture.completedFuture(new KnotLinkResponse(
+                KnotLinkResponse.Status.OK, null, "enabled=true", Map.of("status", "ok", "func_list",
+                "{\"specVersion\":\"1.0\",\"manifestVersion\":\"test\",\"openSocket\":{}}"))),
+                () -> this, () -> com.leafuke.minebackup.api.v2.BackendStatusResult.ChannelState.CONNECTED);
+        assertEquals(com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.Outcome.SUCCESS,
+                queries.capabilities().toCompletableFuture().get().outcome());
+        assertEquals(com.leafuke.minebackup.api.v2.BackendStatusResult.Outcome.SUCCESS,
+                queries.status().toCompletableFuture().get().outcome());
+        assertEquals(backup.id(), coordinator.activeSnapshot().orElseThrow().requestId());
+        assertFalse(backup.completion().toCompletableFuture().isDone());
+        coordinator.close();
+    }
+
+    private static final class CapturingScheduler extends java.util.concurrent.ScheduledThreadPoolExecutor {
+        private Runnable tick;
+        CapturingScheduler() { super(1); }
+        @Override public java.util.concurrent.ScheduledFuture<?> scheduleAtFixedRate(
+                Runnable command, long delay, long period, TimeUnit unit) {
+            tick = command;
+            return super.scheduleAtFixedRate(command, 1, 1, TimeUnit.DAYS);
+        }
+    }
+
     private CurrentWorldOperationCoordinator coordinator() {
         return new CurrentWorldOperationCoordinator(
                 gateway,

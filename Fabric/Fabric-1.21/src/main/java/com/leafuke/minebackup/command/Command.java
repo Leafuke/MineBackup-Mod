@@ -326,7 +326,7 @@ public final class Command {
                             if (error != null) {
                                 MineBackup.LOGGER.warn("Unable to list current-world backups", error);
                                 source.sendError(
-                                        Text.translatable("minebackup.message.communication_failed"));
+                                        FailureMessages.message(error));
                                 return;
                             }
                             if (result.outcome() != BackupCatalogResult.Outcome.SUCCESS) {
@@ -566,10 +566,10 @@ public final class Command {
     private static void sendOperationFailure(
             ServerCommandSource source,
             Optional<OperationFailure> failure) {
-        String message = failure.map(OperationFailure::message).orElse("Unknown operation failure");
+        failure.ifPresent(value -> MineBackup.LOGGER.warn("MineBackup operation failed: {}: {}", value.code(), value.message()));
         source.sendError(Text.translatable(
                 "minebackup.message.command.fail",
-                Text.literal(message)));
+                FailureMessages.message(failure)));
     }
 
     private static String callerId(ServerCommandSource source) {
@@ -590,13 +590,14 @@ public final class Command {
                 source.getServer().execute(() -> {
                     if (error != null) {
                         MineBackup.LOGGER.warn("KnotLink command {} failed", request.commandName(), error);
-                        source.sendError(Text.translatable("minebackup.message.communication_failed"));
+                        source.sendError(FailureMessages.message(error));
                         return;
                     }
                     if (!response.isOk()) {
+                        MineBackup.LOGGER.warn("Backend rejected {}: {}", request.commandName(), response.displayMessage());
                         source.sendError(Text.translatable(
                                 "minebackup.message.command.fail",
-                                Text.literal(response.displayMessage())));
+                                FailureMessages.message(OperationFailure.Code.BACKEND_REJECTED)));
                         return;
                     }
                     onSuccess.accept(response);

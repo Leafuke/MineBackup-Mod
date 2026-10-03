@@ -5,7 +5,7 @@ import com.leafuke.minebackup.MineBackup;
 import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 
-/** Stable in-process integration API for MineBackup 3.1. */
+/** Stable in-process integration API v2; 3.4 adds compatible read-only diagnostics and restore cancellation. */
 public interface MineBackupApi {
     int API_VERSION = 2;
 
@@ -28,6 +28,18 @@ public interface MineBackupApi {
         return java.util.concurrent.CompletableFuture.completedFuture(
                 BackendCapabilitiesResult.unavailable(BackendCapabilitiesResult.Outcome.UNSUPPORTED,
                         "This MineBackup implementation does not expose backend capabilities"));
+    }
+
+    default CompletionStage<BackendStatusResult> backendStatus(BackendStatusRequest request) {
+        java.util.Objects.requireNonNull(request, "request");
+        return java.util.concurrent.CompletableFuture.completedFuture(
+                BackendStatusResult.unavailable(BackendStatusResult.Outcome.UNSUPPORTED, null));
+    }
+
+    /** A UUID is sufficient; callerId attributes the cancellation without enforcing ownership. */
+    default RestoreCancelResult cancelRestore(RestoreCancelRequest request) {
+        java.util.Objects.requireNonNull(request, "request");
+        return RestoreCancelResult.UNSUPPORTED;
     }
 
     default CurrentWorldAutomationState currentWorldAutomation() {

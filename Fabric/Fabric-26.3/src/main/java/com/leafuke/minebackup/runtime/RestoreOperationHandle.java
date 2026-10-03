@@ -12,6 +12,13 @@ final class RestoreOperationHandle
         extends AbstractOperationHandle<RestoreResult>
         implements InternalRestoreHandle {
     private final RestoreRequest request;
+    private boolean submissionStarted;
+
+    boolean claimSubmission() {
+        if (submissionStarted) return false;
+        submissionStarted = true;
+        return true;
+    }
     private Supplier<Duration> remaining = () -> Duration.ZERO;
     private Supplier<RestoreControlResult> confirm = () -> RestoreControlResult.NOT_PENDING;
     private Supplier<RestoreControlResult> cancel = () -> RestoreControlResult.NOT_PENDING;
