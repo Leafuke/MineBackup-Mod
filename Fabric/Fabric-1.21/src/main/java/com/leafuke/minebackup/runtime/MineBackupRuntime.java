@@ -949,6 +949,21 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     }
 
     @Override
+    public com.leafuke.minebackup.api.v2.OperationHandle<com.leafuke.minebackup.api.v2.ProtectedBackupResult> backupProtectedCurrent(BackupRequest request) {
+        var handle = operations.startBackup(request, true);
+        automaticBackups.observeExternalBackup(handle);
+        return handle.protectedView();
+    }
+
+    @Override
+    public com.leafuke.minebackup.api.v2.OperationHandle<com.leafuke.minebackup.api.v2.BackupProtectionResult> setBackupProtection(
+            com.leafuke.minebackup.api.v2.BackupProtectionRequest request) { return operations.protection(request, true); }
+
+    @Override
+    public java.util.concurrent.CompletionStage<com.leafuke.minebackup.api.v2.BackupProtectionResult> queryBackupProtection(
+            com.leafuke.minebackup.api.v2.BackupProtectionRequest request) { return operations.protection(request, false).completion(); }
+
+    @Override
     public OperationHandle<RestoreResult> restoreCurrent(RestoreRequest request) {
         if (dedicatedServer && operationsAvailable) {
             DedicatedRestoreManager.Availability availability = dedicatedRestore.availability(

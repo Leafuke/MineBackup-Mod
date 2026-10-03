@@ -17,6 +17,21 @@ public interface MineBackupApi {
 
     OperationHandle<BackupResult> backupCurrent(BackupRequest request);
 
+    default OperationHandle<ProtectedBackupResult> backupProtectedCurrent(BackupRequest request) {
+        java.util.Objects.requireNonNull(request);
+        return new CompletedOperationHandle<>(request.callerId(), ProtectedBackupResult.unsupported());
+    }
+
+    default OperationHandle<BackupProtectionResult> setBackupProtection(BackupProtectionRequest request) {
+        java.util.Objects.requireNonNull(request);
+        return new CompletedOperationHandle<>(request.callerId(), BackupProtectionResult.unsupported(request.backupId()));
+    }
+
+    default CompletionStage<BackupProtectionResult> queryBackupProtection(BackupProtectionRequest request) {
+        java.util.Objects.requireNonNull(request);
+        return java.util.concurrent.CompletableFuture.completedFuture(BackupProtectionResult.unsupported(request.backupId()));
+    }
+
     OperationHandle<RestoreResult> restoreCurrent(RestoreRequest request);
 
     CompletionStage<BackupCatalogResult> listCurrentBackups(BackupCatalogRequest request);

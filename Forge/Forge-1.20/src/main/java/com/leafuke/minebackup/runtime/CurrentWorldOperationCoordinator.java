@@ -1,6 +1,8 @@
 package com.leafuke.minebackup.runtime;
 
 import com.leafuke.minebackup.api.v2.BackupId;
+import com.leafuke.minebackup.api.v2.BackupProtectionRequest;
+import com.leafuke.minebackup.api.v2.BackupProtectionResult;
 import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
 import com.leafuke.minebackup.api.v2.BackupCatalogResult;
 import com.leafuke.minebackup.api.v2.BackupRequest;
@@ -96,7 +98,12 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
     }
 
     OperationHandle<BackupResult> backupCurrent(BackupRequest request) {
+        return startBackup(request, false);
+    }
+
+    BackupOperationHandle startBackup(BackupRequest request, boolean protect) {
         Objects.requireNonNull(request, "request");
+        if (request.parameters().containsKey("protect")) throw new IllegalArgumentException("Use backupProtectedCurrent for protection");
         BackupOperationHandle handle;
         synchronized (this) {
             if (closed || !serverAvailable.getAsBoolean()) {
@@ -115,6 +122,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                     UUID.randomUUID(),
                     request,
                     OperationPhase.SUBMITTING);
+            handle.protectedBackup = protect;
             active = handle;
         }
 
@@ -123,7 +131,10 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                 .field("current_save", true);
         request.comment().ifPresent(comment -> command.field("comment", comment));
         request.parameters().forEach(command::field);
-        submitBackup(handle, command);
+        if (protect) {
+            command.field("protect", true);
+            discoverProtection(handle, "BACKUP", true, () -> submitBackup(handle, command));
+        } else submitBackup(handle, command);
         return handle;
     }
 
@@ -191,6 +202,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         }
         OperationType type = active instanceof RestoreOperationHandle
                 ? OperationType.RESTORE
+                : active instanceof BackupProtectionHandle ? OperationType.BACKUP_PROTECTION
                 : active instanceof CatalogOperationHandle
                         ? OperationType.CATALOG
                         : OperationType.BACKUP;
@@ -525,10 +537,33 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         return (int) Math.ceil(remainingNanos / 1_000_000_000.0);
     }
 
-    private void handleBackupSignal(
+    private synchronized void handleBackupSignal(
             BackupOperationHandle handle,
             Map<String, String> fields,
             String event) {
+        if (handle.protectedBackup) {
+            if (handle.phase().isTerminal()) return;
+            if (!handle.id().toString().equals(fields.get("request_id"))
+                    || !KnotLinkRequest.CALLER_ID.equals(fields.get("from"))) return;
+            if ("command_failed".equals(event) && commandMatches(fields, "BACKUP")
+                    && "canceled".equals(fields.get("reason"))) {
+                finishBackup(handle, BackupResult.Outcome.CANCELLED, null,
+                        new OperationFailure(OperationFailure.Code.BACKEND_CANCELLED, "Protected backup cancelled"));
+                return;
+            }
+            if ("backup_success".equals(event)) return; // Per-source event precedes the protected transaction receipt.
+            if ("command_completed".equals(event) && commandMatches(fields, "BACKUP")) {
+                String result = fields.get("result");
+                if (!"true".equals(fields.get("important")) || fields.getOrDefault("file", "").isBlank()
+                        || !("created".equals(result) || "reused".equals(result))) {
+                    failBackup(handle, OperationFailure.Code.PROTOCOL_ERROR, "Protected backup was not confirmed");
+                } else {
+                    handle.protectionConfirmed = true; handle.reused = "reused".equals(result);
+                    finishBackup(handle, BackupResult.Outcome.CREATED, fields.get("file"), null);
+                }
+                return;
+            }
+        }
         if ("backup_success".equals(event)) {
             finishBackup(handle, BackupResult.Outcome.CREATED, fields.get("file"), null);
             return;
@@ -726,6 +761,8 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
             failBackup(backup, OperationFailure.Code.SERVER_STOPPED, message);
         } else if (current instanceof RestoreOperationHandle restore) {
             failRestore(restore, OperationFailure.Code.SERVER_STOPPED, message);
+        } else if (current instanceof BackupProtectionHandle protection) {
+            failProtection(protection, OperationFailure.Code.SERVER_STOPPED, message);
         } else if (current instanceof CatalogOperationHandle catalog) {
             BackupCatalogResult result = BackupCatalogResult.failed(
                     BackupCatalogResult.Outcome.FAILED,
@@ -734,6 +771,80 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                 release(catalog);
             }
         }
+    }
+
+    OperationHandle<BackupProtectionResult> protection(BackupProtectionRequest request, boolean set) {
+        Objects.requireNonNull(request);
+        var handle = new BackupProtectionHandle(request);
+        synchronized (this) {
+            if (closed || !serverAvailable.getAsBoolean()) {
+                failProtection(handle, OperationFailure.Code.NO_ACTIVE_SERVER, "No active Minecraft server"); return handle;
+            }
+            if (hasActiveOperation()) {
+                failProtection(handle, OperationFailure.Code.BUSY, "Another current-world operation is active"); return handle;
+            }
+            active = handle;
+        }
+        String command = set ? "MARK_IMPORTANT" : "GET_IMPORTANCE";
+        discoverProtection(handle, command, false, () -> {
+            var wire = KnotLinkRequest.command(command).conversation(handle.id()).field("current_save", true)
+                    .field("file", request.backupId().value());
+            if (set) wire.field("important", request.important());
+            knotLink.query(wire).whenComplete((response, error) -> {
+                synchronized (this) {
+                    if (handle.phase().isTerminal()) return;
+                    if (error != null) { var f = KnotLinkCommunicationException.failure(error); failProtection(handle, f.code(), f.message()); return; }
+                    if (response == null || !response.isOk()) { failProtection(handle, OperationFailure.Code.BACKEND_REJECTED, response == null ? "Missing response" : response.displayMessage()); return; }
+                    var fields = response.fields();
+                    var flag = fields.get("important");
+                    if (!handle.id().toString().equals(fields.get("request_id"))
+                            || !KnotLinkRequest.CALLER_ID.equals(fields.get("from"))
+                            || !request.backupId().value().equals(fields.get("file"))
+                            || !("true".equals(flag) || "false".equals(flag))
+                            || set && Boolean.parseBoolean(flag) != request.important()) {
+                        failProtection(handle, OperationFailure.Code.PROTOCOL_ERROR, "Invalid protection receipt"); return;
+                    }
+                    if (handle.finish(OperationPhase.SUCCEEDED, new BackupProtectionResult(BackupProtectionResult.Outcome.SUCCESS,
+                            request.backupId(), Optional.of(Boolean.parseBoolean(flag)), Optional.empty()))) release(handle);
+                }
+            });
+        });
+        return handle;
+    }
+
+    private void discoverProtection(AbstractOperationHandle<?> handle, String command, boolean requireProtect, Runnable submit) {
+        try {
+        knotLink.query(KnotLinkRequest.command("GET_CAPABILITIES")).whenComplete((response, error) -> {
+            synchronized (this) {
+                if (handle.phase().isTerminal() || active != handle) return;
+                try {
+                    if (error != null) { var f = KnotLinkCommunicationException.failure(error); failProtectionOperation(handle, f.code(), f.message()); return; }
+                    if (response == null || !response.isOk()) { failProtectionOperation(handle, OperationFailure.Code.UNSUPPORTED, "Backend does not expose protection capabilities"); return; }
+                    var declaration = BackendCapabilitiesParser.parse(response.fields().get("func_list")).commands().get(command);
+                    if (declaration == null || requireProtect && !declaration.parameters().containsKey("protect")) {
+                        failProtectionOperation(handle, OperationFailure.Code.UNSUPPORTED, "Backend does not support " + command + " protection"); return;
+                    }
+                    submit.run();
+                } catch (RuntimeException invalid) { failProtectionOperation(handle, OperationFailure.Code.PROTOCOL_ERROR, invalid.getMessage()); }
+            }
+        });
+        } catch (RuntimeException unavailable) {
+            failProtectionOperation(handle, OperationFailure.Code.COMMUNICATION_ERROR, unavailable.getMessage());
+        }
+    }
+
+    private void failProtectionOperation(AbstractOperationHandle<?> handle, OperationFailure.Code code, String message) {
+        if (handle instanceof BackupOperationHandle backup) failBackup(backup, code, message);
+        else failProtection((BackupProtectionHandle) handle, code, message);
+    }
+
+    private void failProtection(BackupProtectionHandle handle, OperationFailure.Code code, String message) {
+        var outcome = code == OperationFailure.Code.UNSUPPORTED ? BackupProtectionResult.Outcome.UNSUPPORTED
+                : code == OperationFailure.Code.BUSY || code == OperationFailure.Code.NO_ACTIVE_SERVER
+                ? BackupProtectionResult.Outcome.REJECTED : BackupProtectionResult.Outcome.FAILED;
+        if (handle.finish(outcome == BackupProtectionResult.Outcome.REJECTED || outcome == BackupProtectionResult.Outcome.UNSUPPORTED
+                ? OperationPhase.REJECTED : OperationPhase.FAILED,
+                new BackupProtectionResult(outcome, handle.request.backupId(), Optional.empty(), Optional.of(new OperationFailure(code, message))))) release(handle);
     }
 
     private synchronized boolean hasActiveOperation() {

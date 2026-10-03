@@ -9,6 +9,7 @@ public record OperationFailure(Code code, String message) {
     }
 
     public enum Code {
+        UNSUPPORTED,
         BUSY,
         NO_ACTIVE_SERVER,
         COMMUNICATION_ERROR,

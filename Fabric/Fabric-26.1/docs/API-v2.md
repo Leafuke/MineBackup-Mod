@@ -127,3 +127,24 @@ Backend queries are read-only and bypass the operation gate. Their origin must s
 `cancelRestore(RestoreCancelRequest.create(callerId, operationUuid))` atomically cancels a matching restore only in `COUNTING_DOWN`. UUID possession is sufficient; callerId is attribution, not ownership. The result is `CANCELLED`, `NOT_PENDING`, `ALREADY_SUBMITTED`, or `UNSUPPORTED`. Cancellation never stops a submitted backend restore. Administrators retain the existing `/mb stop` behavior.
 
 See [backend diagnostics and cancellation examples](BACKEND-CAPABILITIES.md) for contracts and migration notes. `OperationFailure.message()` retains technical detail; user interfaces should localize the structured code. An addon requiring these newly added types needs MineBackup >=3.4.0 or explicit legacy linkage handling.
+
+
+## 3.4.0 companion build: protected backups
+
+The eight maintained mod targets expose these additive API v2 methods without changing `API_VERSION` or the mod version:
+
+```java
+api.setBackupProtection(BackupProtectionRequest.set("addon:pin", backupId, true));
+api.queryBackupProtection(BackupProtectionRequest.query("addon:pin", backupId));
+api.backupProtectedCurrent(BackupRequest.create("addon:record", "Before the expedition"));
+```
+
+`setBackupProtection` returns `OperationHandle<BackupProtectionResult>`; query returns `CompletionStage<BackupProtectionResult>`. A successful result has an explicit `important` value. Rejection, unsupported implementations, communication errors and missing targets never become `false`. These methods operate only on the current bound world, share its operation gate, and query backend capabilities first. Callers enforce player authorization. Cancellation attribution does not confer authorization.
+
+`backupProtectedCurrent` returns `OperationHandle<ProtectedBackupResult>`. `CREATED` and `REUSED` require a named backup and confirmed protection; other outcomes are `CANCELLED`, `REJECTED`, `FAILED`, `UNSUPPORTED`. A reused backup keeps its original filename and version comment; the new request comment does not rename it. Full/smart compression remains configurable, but the effective source must be complete and unfiltered. No fallback or retry is performed. Ordinary `backupCurrent` remains ordinary; the control parameter `protect` is reserved for the protected API.
+
+FolderRewind uses `BACKUP;protect=true`, `MARK_IMPORTANT`, and `GET_IMPORTANCE`. Protection is committed with the version/history transaction. Per-source `backup_success` is not a protected receipt; the final correlated `command_completed` must contain `result=created|reused`, `file`, and `important=true`. Pin queries describe retention annotations, not restore readiness. Completion callbacks need not run on a Minecraft thread.
+
+New methods have default unsupported implementations. An old JAR may not contain the new types at all: check method availability before loading an adapter that references them, as Time-Machine does. The same 3.4.0 number does not prove support.
+
+The public ID is still the backend filename. Backend compaction can replace or collide filenames; this change neither fixes that limitation nor provides permanent return tickets. No new branch/history-graph API is introduced.
