@@ -57,6 +57,12 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
     private final CountdownListener countdownListener;
     private final LongSupplier nanoTime;
 
+    private java.util.function.Supplier<CompletionStage<com.leafuke.minebackup.api.v2.BackendCapabilitiesResult>> capabilities;
+
+    void capabilitySource(java.util.function.Supplier<CompletionStage<com.leafuke.minebackup.api.v2.BackendCapabilitiesResult>> source) {
+        capabilities = Objects.requireNonNull(source);
+    }
+
     private AbstractOperationHandle<?> active;
     private ScheduledFuture<?> countdownFuture;
     private long restoreDeadlineNanos;
@@ -96,6 +102,9 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                 Objects.requireNonNull(configuredCountdownSeconds, "configuredCountdownSeconds");
         this.countdownListener = Objects.requireNonNull(countdownListener, "countdownListener");
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
+        var discovery = new BackendQueries(knotLink, () -> serverAvailable.getAsBoolean() ? this : null,
+                () -> com.leafuke.minebackup.api.v2.BackendStatusResult.ChannelState.UNKNOWN);
+        capabilities = discovery::capabilities;
     }
 
     OperationHandle<BackupResult> backupCurrent(BackupRequest request) {
@@ -159,7 +168,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
 
             seconds = request.executionPolicy() == RestoreExecutionPolicy.IMMEDIATE
                     ? 0
-                    : Math.clamp(configuredCountdownSeconds.getAsInt(), 0, 300);
+                    : request.countdownSeconds().orElseGet(() -> Math.clamp(configuredCountdownSeconds.getAsInt(), 0, 300));
             OperationPhase initial = seconds == 0
                     ? OperationPhase.SUBMITTING
                     : OperationPhase.COUNTING_DOWN;
@@ -826,13 +835,13 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
 
     private void discoverProtection(AbstractOperationHandle<?> handle, String command, boolean requireProtect, Runnable submit) {
         try {
-        knotLink.query(KnotLinkRequest.command("GET_CAPABILITIES")).whenComplete((response, error) -> {
+        capabilities.get().whenComplete((response, error) -> {
             synchronized (this) {
                 if (handle.phase().isTerminal() || active != handle) return;
                 try {
                     if (error != null) { var f = KnotLinkCommunicationException.failure(error); failProtectionOperation(handle, f.code(), f.message()); return; }
-                    if (response == null || !response.isOk()) { failProtectionOperation(handle, OperationFailure.Code.UNSUPPORTED, "Backend does not expose protection capabilities"); return; }
-                    var declaration = BackendCapabilitiesParser.parse(response.fields().get("func_list")).commands().get(command);
+                    if (response == null || response.outcome() != com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.Outcome.SUCCESS) { failProtectionOperation(handle, response != null && response.outcome() == com.leafuke.minebackup.api.v2.BackendCapabilitiesResult.Outcome.FAILED ? OperationFailure.Code.COMMUNICATION_ERROR : OperationFailure.Code.UNSUPPORTED, response == null ? "Missing capability response" : response.detail()); return; }
+                    var declaration = response.commands().get(command);
                     if (declaration == null || requireProtect && !declaration.parameters().containsKey("protect")) {
                         failProtectionOperation(handle, OperationFailure.Code.UNSUPPORTED, "Backend does not support " + command + " protection"); return;
                     }

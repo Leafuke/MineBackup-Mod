@@ -42,6 +42,30 @@ class CurrentWorldOperationCoordinatorTest {
     private final AtomicInteger countdownSeconds = new AtomicInteger(10);
     private final RecordingCountdownListener listener = new RecordingCountdownListener();
 
+    @Test void perRequestCountdownFreezesAndPreservesLegacyConstruction() {
+        var base = RestoreRequest.file("test", "one.7z");
+        var legacy = new RestoreRequest(base.callerId(), base.backupId(), base.comment(), base.executionPolicy(), base.parameters(), base.presentation());
+        assertTrue(legacy.countdownSeconds().isEmpty());
+        for (int seconds : new int[] {0, 1, 300}) {
+            var request = base.withCountdownSeconds(seconds).withComment("test")
+                .withParameter("verify_archive", "true").withPresentation(base.presentation());
+            assertEquals(seconds, request.countdownSeconds().orElseThrow());
+            assertTrue(request.immediate().countdownSeconds().isEmpty());
+            assertEquals(seconds, request.immediate().withCountdownSeconds(seconds).countdownSeconds().orElseThrow());
+        }
+        assertThrows(IllegalArgumentException.class, () -> base.withCountdownSeconds(-1));
+        assertThrows(IllegalArgumentException.class, () -> base.withCountdownSeconds(301));
+        var coordinator = coordinator();
+        var handle = coordinator.restoreCurrent(base.withCountdownSeconds(300));
+        assertEquals(OperationPhase.COUNTING_DOWN, handle.phase());
+        countdownSeconds.set(1);
+        assertTrue(handle.remaining().toSeconds() > 290);
+        handle.cancel();
+        var zero = coordinator.restoreCurrent(base.withCountdownSeconds(0));
+        assertFalse(zero.phase() == OperationPhase.COUNTING_DOWN);
+        assertFalse(gateway.requests.getLast().serialize().contains("countdown"));
+    }
+
     @AfterEach
     void closeScheduler() {
         scheduler.shutdownNow();

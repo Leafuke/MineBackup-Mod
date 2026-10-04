@@ -11,10 +11,19 @@ public record RestoreRequest(
         Optional<String> comment,
         RestoreExecutionPolicy executionPolicy,
         Map<String, String> parameters,
-        OperationPresentation presentation) {
+        OperationPresentation presentation, java.util.OptionalInt countdownSeconds) {
     private static final Set<String> RESERVED_PARAMETERS = Set.of("file", "comment");
 
+    public RestoreRequest(String callerId, Optional<BackupId> backupId, Optional<String> comment,
+            RestoreExecutionPolicy executionPolicy, Map<String, String> parameters, OperationPresentation presentation) {
+        this(callerId, backupId, comment, executionPolicy, parameters, presentation, java.util.OptionalInt.empty());
+    }
+
     public RestoreRequest {
+        Objects.requireNonNull(countdownSeconds, "countdownSeconds");
+        if (countdownSeconds.isPresent() && (countdownSeconds.getAsInt() < 0 || countdownSeconds.getAsInt() > 300))
+            throw new IllegalArgumentException("Countdown must be between 0 and 300 seconds");
+        if (executionPolicy == RestoreExecutionPolicy.IMMEDIATE) countdownSeconds = java.util.OptionalInt.empty();
         callerId = CallerId.normalize(callerId);
         Objects.requireNonNull(backupId, "backupId");
         Objects.requireNonNull(comment, "comment");
@@ -48,6 +57,12 @@ public record RestoreRequest(
         return backup(callerId, BackupId.of(fileName));
     }
 
+    /** Overrides this operation only; never changes configuration or backend parameters. */
+    public RestoreRequest withCountdownSeconds(int seconds) {
+        return new RestoreRequest(callerId, backupId, comment, RestoreExecutionPolicy.CONFIGURED_COUNTDOWN,
+                parameters, presentation, java.util.OptionalInt.of(seconds));
+    }
+
     public RestoreRequest immediate() {
         return new RestoreRequest(
                 callerId,
@@ -69,11 +84,11 @@ public record RestoreRequest(
                 comment,
                 executionPolicy,
                 ApiParameterSupport.merge(parameters, additions, RESERVED_PARAMETERS),
-                presentation);
+                presentation, countdownSeconds);
     }
 
     public RestoreRequest withPresentation(OperationPresentation value) {
-        return new RestoreRequest(callerId, backupId, comment, executionPolicy, parameters, value);
+        return new RestoreRequest(callerId, backupId, comment, executionPolicy, parameters, value, countdownSeconds);
     }
 
     public RestoreRequest withComment(String value) {
@@ -83,6 +98,6 @@ public record RestoreRequest(
                 Optional.ofNullable(value),
                 executionPolicy,
                 parameters,
-                presentation);
+                presentation, countdownSeconds);
     }
 }

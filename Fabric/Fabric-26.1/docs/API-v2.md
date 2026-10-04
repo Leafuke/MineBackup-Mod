@@ -148,3 +148,21 @@ FolderRewind uses `BACKUP;protect=true`, `MARK_IMPORTANT`, and `GET_IMPORTANCE`.
 New methods have default unsupported implementations. An old JAR may not contain the new types at all: check method availability before loading an adapter that references them, as Time-Machine does. The same 3.4.0 number does not prove support.
 
 The public ID is still the backend filename. Backend compaction can replace or collide filenames; this change neither fixes that limitation nor provides permanent return tickets. No new branch/history-graph API is introduced.
+
+
+## 3.4.0 companion build: per-request countdown and cached discovery
+
+```java
+var request = RestoreRequest.backup("addon:travel", backupId).withCountdownSeconds(5);
+api.restoreCurrent(request);
+api.backendCapabilities(BackendCapabilitiesRequest.create("addon:preview"));
+api.backendCapabilities(BackendCapabilitiesRequest.create("addon:refresh").refreshed());
+```
+
+`RestoreRequest.countdownSeconds()` is optional. Its original six-argument constructor and factories remain available. An absent value uses the configured countdown; accepted operations freeze the effective value. Overrides accept 0–300 whole seconds, with zero submitting immediately. `immediate()` clears the override; a subsequent `withCountdownSeconds(...)` switches back to the specified countdown. Other copy methods preserve it. This is a local scheduling option, never a FolderRewind parameter or a global configuration edit.
+
+Capabilities share a world/connection-scoped cache with protected backup operations. Concurrent discovery coalesces; cancelling or timing out a caller's returned future cannot cancel the shared discovery. Successful snapshots remain cached until world/connection replacement or explicit refresh. Failures are throttled for five seconds; refresh bypasses this throttle. Refresh during an existing discovery joins that discovery. There is no periodic refresh and no automatic write retry.
+
+`BackendCapabilitiesResult.generation()` distinguishes refreshed sessions even when the manifest is identical. The original four-argument constructor remains available (generation zero). A preview and confirmation should require the same generation and declarations. `BackendCapabilitiesRequest` preserves its original one-argument constructor. Signal disconnect/reconnect invalidates the cache; if the desktop backend changes without a detectable transport change, use explicit refresh.
+
+The mod version and API major remain 3.4.0 and 2. Old same-version JARs may lack these additions. Probe method presence before using a typed countdown adapter; do not infer support from the version number.

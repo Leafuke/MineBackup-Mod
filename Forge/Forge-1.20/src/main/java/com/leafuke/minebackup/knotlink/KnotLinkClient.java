@@ -87,6 +87,9 @@ public final class KnotLinkClient implements AutoCloseable {
                 this.host, this.queryPort, this.connectTimeoutMillis, MAX_RESPONSE_BYTES);
     }
 
+    private final java.util.concurrent.atomic.AtomicLong capabilityEpoch = new java.util.concurrent.atomic.AtomicLong();
+    public long capabilityEpoch() { return capabilityEpoch.get(); }
+
     private volatile boolean closed;
     private boolean subscriberRunning;
     private BackendStatusResult.ChannelState signalState = BackendStatusResult.ChannelState.UNKNOWN;
@@ -143,6 +146,7 @@ public final class KnotLinkClient implements AutoCloseable {
             signalState = BackendStatusResult.ChannelState.UNKNOWN;
             signalListener = null;
             current = subscriber;
+            capabilityEpoch.incrementAndGet();
             subscriber = null;
         }
         if (current != null) {
@@ -242,6 +246,7 @@ public final class KnotLinkClient implements AutoCloseable {
                 active = subscriber == candidate && subscriberRunning && !closed;
                 if (active) {
                     reconnectDelaySeconds = 1;
+                    capabilityEpoch.incrementAndGet();
                     signalState = BackendStatusResult.ChannelState.CONNECTED;
                 }
             }
@@ -289,6 +294,7 @@ public final class KnotLinkClient implements AutoCloseable {
             if (subscriber != expected) {
                 return false;
             }
+            capabilityEpoch.incrementAndGet();
             subscriber = null;
             signalState = subscriberRunning && !closed
                     ? BackendStatusResult.ChannelState.UNREACHABLE : BackendStatusResult.ChannelState.UNKNOWN;
@@ -343,11 +349,13 @@ public final class KnotLinkClient implements AutoCloseable {
             if (closed) {
                 return;
             }
+            capabilityEpoch.incrementAndGet();
             closed = true;
             subscriberRunning = false;
             signalState = BackendStatusResult.ChannelState.UNKNOWN;
             signalListener = null;
             current = subscriber;
+            capabilityEpoch.incrementAndGet();
             subscriber = null;
         }
         if (current != null) {

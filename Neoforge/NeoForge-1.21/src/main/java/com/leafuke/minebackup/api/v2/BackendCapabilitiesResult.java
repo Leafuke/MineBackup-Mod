@@ -7,7 +7,11 @@ import java.util.Optional;
 
 /** Immutable declaration snapshot. Declarations do not establish plugin or world readiness. */
 public record BackendCapabilitiesResult(
-        Outcome outcome, String manifestVersion, Map<String, Command> commands, String detail) {
+        Outcome outcome, String manifestVersion, Map<String, Command> commands, String detail, long generation) {
+    public BackendCapabilitiesResult(Outcome outcome, String manifestVersion, Map<String, Command> commands, String detail) {
+        this(outcome, manifestVersion, commands, detail, 0L);
+    }
+
     public enum Outcome { SUCCESS, UNSUPPORTED, UNAVAILABLE, FAILED }
 
     public BackendCapabilitiesResult {

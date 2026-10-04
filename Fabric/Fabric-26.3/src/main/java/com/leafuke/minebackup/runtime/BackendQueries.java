@@ -20,26 +20,72 @@ final class BackendQueries {
 
     BackendQueries(KnotLinkGateway gateway, Supplier<Object> origin,
             Supplier<BackendStatusResult.ChannelState> signal) {
+        this.epoch = () -> 0L;
         this.gateway = java.util.Objects.requireNonNull(gateway, "gateway");
         this.origin = java.util.Objects.requireNonNull(origin, "origin");
         this.signal = java.util.Objects.requireNonNull(signal, "signal");
     }
 
-    CompletionStage<BackendCapabilitiesResult> capabilities() {
+    private final java.util.function.LongSupplier epoch;
+    private static final java.util.concurrent.atomic.AtomicLong GENERATIONS = new java.util.concurrent.atomic.AtomicLong();
+    private Object cachedWorld;
+    private long cachedEpoch, generation, failedUntil;
+    private CompletableFuture<BackendCapabilitiesResult> cached;
+
+    BackendQueries(KnotLinkGateway gateway, Supplier<Object> origin,
+            Supplier<BackendStatusResult.ChannelState> signal, java.util.function.LongSupplier epoch) {
+        this.gateway = java.util.Objects.requireNonNull(gateway);
+        this.origin = java.util.Objects.requireNonNull(origin);
+        this.signal = java.util.Objects.requireNonNull(signal);
+        this.epoch = java.util.Objects.requireNonNull(epoch);
+    }
+
+    CompletionStage<BackendCapabilitiesResult> capabilities() { return capabilities(false); }
+
+    synchronized CompletionStage<BackendCapabilitiesResult> capabilities(boolean refresh) {
         Object world = origin.get();
-        if (world == null) return CompletableFuture.completedFuture(BackendCapabilitiesResult.unavailable(
-                BackendCapabilitiesResult.Outcome.UNAVAILABLE, "No active Minecraft server"));
-        return gateway.query(KnotLinkRequest.command("GET_CAPABILITIES")).handle((response, error) -> {
-            if (origin.get() != world) return BackendCapabilitiesResult.unavailable(
-                    BackendCapabilitiesResult.Outcome.UNAVAILABLE, "Originating world closed");
-            if (error != null) return BackendCapabilitiesResult.unavailable(
-                    BackendCapabilitiesResult.Outcome.FAILED, KnotLinkCommunicationException.failure(error).message());
-            if (response == null || !response.isOk()) return BackendCapabilitiesResult.unavailable(
-                    BackendCapabilitiesResult.Outcome.FAILED, response == null ? "Missing backend response" : response.displayMessage());
-            try { return BackendCapabilitiesParser.parse(response.fields().get("func_list")); }
-            catch (RuntimeException malformed) { return BackendCapabilitiesResult.unavailable(
-                    BackendCapabilitiesResult.Outcome.FAILED, "Invalid capability manifest"); }
-        });
+        long connection = epoch.getAsLong();
+        if (world == null) {
+            cached = null; cachedWorld = null;
+            return CompletableFuture.completedFuture(BackendCapabilitiesResult.unavailable(
+                    BackendCapabilitiesResult.Outcome.UNAVAILABLE, "No active Minecraft server"));
+        }
+        if (cached != null && cachedWorld == world && cachedEpoch == connection
+                && (!cached.isDone() || !refresh && (failedUntil == 0 || System.nanoTime() < failedUntil)))
+            return cached.thenApply(value -> value);
+        cachedWorld = world; cachedEpoch = connection; failedUntil = 0;
+        long ticket = generation = GENERATIONS.incrementAndGet();
+        CompletableFuture<BackendCapabilitiesResult> result = new CompletableFuture<>();
+        cached = result;
+        try {
+            gateway.query(KnotLinkRequest.command("GET_CAPABILITIES")).whenComplete((response, error) -> {
+                BackendCapabilitiesResult value;
+                try {
+                    if (error != null) value = BackendCapabilitiesResult.unavailable(
+                            BackendCapabilitiesResult.Outcome.FAILED, KnotLinkCommunicationException.failure(error).message());
+                    else if (response == null || !response.isOk()) value = BackendCapabilitiesResult.unavailable(
+                            BackendCapabilitiesResult.Outcome.FAILED, response == null ? "Missing backend response" : response.displayMessage());
+                    else value = BackendCapabilitiesParser.parse(response.fields().get("func_list"));
+                } catch (RuntimeException malformed) {
+                    value = BackendCapabilitiesResult.unavailable(BackendCapabilitiesResult.Outcome.FAILED, "Invalid capability manifest");
+                }
+                synchronized (this) {
+                    if (origin.get() != world || epoch.getAsLong() != connection || generation != ticket) {
+                        result.complete(BackendCapabilitiesResult.unavailable(
+                                BackendCapabilitiesResult.Outcome.UNAVAILABLE, "Capability session changed"));
+                        return;
+                    }
+                    if (value.outcome() != BackendCapabilitiesResult.Outcome.SUCCESS)
+                        failedUntil = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                    result.complete(new BackendCapabilitiesResult(value.outcome(), value.manifestVersion(), value.commands(), value.detail(), ticket));
+                }
+            });
+        } catch (RuntimeException unavailable) {
+            failedUntil = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            result.complete(BackendCapabilitiesResult.unavailable(BackendCapabilitiesResult.Outcome.FAILED, unavailable.toString()));
+        }
+        // A caller timing out/cancelling its future must not poison the shared discovery.
+        return result.thenApply(value -> value);
     }
 
     CompletionStage<BackendStatusResult> status() {

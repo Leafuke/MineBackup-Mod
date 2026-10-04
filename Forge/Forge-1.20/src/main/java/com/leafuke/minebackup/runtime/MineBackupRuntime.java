@@ -1012,16 +1012,17 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         return operations.listCurrentBackups(request);
     }
 
-    private BackendQueries backendQueries() {
-        return new BackendQueries(knotLink::query, () -> operationsAvailable ? server : null,
-                knotLink::signalChannelState);
-    }
+    private final BackendQueries sharedBackendQueries = new BackendQueries(knotLink::query,
+            () -> operationsAvailable ? server : null, knotLink::signalChannelState, knotLink::capabilityEpoch);
+    { operations.capabilitySource(sharedBackendQueries::capabilities); }
+
+    private BackendQueries backendQueries() { return sharedBackendQueries; }
 
     @Override
     public CompletionStage<com.leafuke.minebackup.api.v2.BackendCapabilitiesResult> backendCapabilities(
             com.leafuke.minebackup.api.v2.BackendCapabilitiesRequest request) {
         java.util.Objects.requireNonNull(request, "request");
-        return backendQueries().capabilities();
+        return backendQueries().capabilities(request.refresh());
     }
 
     @Override
