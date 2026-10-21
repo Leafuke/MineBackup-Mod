@@ -50,6 +50,14 @@ class CommandPermissionsTest {
     }
 
     @Test
+    void backupPermissionAloneDoesNotGrantAutomationManagement() {
+        assertFalse(allowed(false,
+                Set.of(CommandCapability.BACKUP.permission()), CommandCapability.AUTOMATION));
+        assertTrue(allowed(false,
+                Set.of(CommandCapability.AUTOMATION.permission()), CommandCapability.AUTOMATION));
+    }
+
+    @Test
     void everyCapabilityKeepsModeratorFallback() {
         Set<Permission> moderator = new HashSet<>();
         moderator.add(Permissions.COMMANDS_MODERATOR);

@@ -15,6 +15,47 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ConfigTest {
     @TempDir
     Path root;
+
+    @Test
+    void oldAndMalformedConfigsKeepAlwaysShowingJoinStatus() {
+        Config.Snapshot old = Config.fromProperties(new Properties());
+        assertEquals(Config.JoinStatusNotificationMode.ALWAYS, old.joinStatusNotificationMode());
+        assertEquals("ALWAYS", Config.toProperties(old)
+                .getProperty("automation.joinStatusNotification.mode"));
+
+        for (String invalid : new String[] {"", "  ", "true", "disabled", "unknown"}) {
+            Properties properties = new Properties();
+            properties.setProperty("automation.joinStatusNotification.mode", invalid);
+            assertEquals(Config.JoinStatusNotificationMode.ALWAYS,
+                    Config.fromProperties(properties).joinStatusNotificationMode(), invalid);
+        }
+    }
+
+    @Test
+    void joinStatusModesRoundTripAndSurviveScheduleMigration() {
+        for (Config.JoinStatusNotificationMode mode : Config.JoinStatusNotificationMode.values()) {
+            Properties properties = new Properties();
+            properties.setProperty("automation.joinStatusNotification.mode",
+                    "  " + mode.name().toLowerCase(java.util.Locale.ROOT) + "  ");
+            properties.setProperty("auto.currentWorld.intervalMinutes", "30");
+            properties.setProperty("restore.countdownSeconds", "17");
+
+            Config.Snapshot parsed = Config.fromProperties(properties);
+            assertEquals(mode, parsed.joinStatusNotificationMode());
+            assertEquals(mode.name(), Config.toProperties(parsed)
+                    .getProperty("automation.joinStatusNotification.mode"));
+            assertEquals(parsed, Config.fromProperties(Config.toProperties(parsed)));
+
+            Config.Snapshot migrated = parsed.withAutoBackup(null);
+            assertNull(migrated.autoBackup());
+            assertEquals(mode, migrated.joinStatusNotificationMode());
+            assertEquals(17, migrated.restore().countdownSeconds());
+            assertEquals(migrated, Config.fromProperties(Config.toProperties(migrated)));
+            assertEquals(mode, migrated.withAutoBackup(new Config.AutoBackup(45))
+                    .joinStatusNotificationMode());
+        }
+    }
+
     @Test
     void restoreCountdownUsesDefaultAndClampsNumericValues() {
         Config.Snapshot defaults = Config.fromProperties(new Properties());
@@ -52,6 +93,7 @@ class ConfigTest {
         legacy.setProperty("auto.configId", "legacy-config");
         legacy.setProperty("auto.folder", "world");
         legacy.setProperty("auto.intervalMinutes", "15");
+        legacy.setProperty("automation.joinStatusNotification.mode", "never");
 
         Config.Snapshot snapshot = Config.fromProperties(legacy);
 
@@ -62,6 +104,7 @@ class ConfigTest {
         assertFalse(canonical.containsKey("auto.configId"));
         assertFalse(canonical.containsKey("auto.folder"));
         assertFalse(canonical.containsKey("auto.intervalMinutes"));
+        assertEquals("NEVER", canonical.getProperty("automation.joinStatusNotification.mode"));
     }
 
     @Test
@@ -86,10 +129,17 @@ class ConfigTest {
     void migratesLegacyFileOnlyWhenCanonicalDoesNotExist() throws Exception {
         Path target = root.resolve("minebackup.properties");
         Path legacy = root.resolve("minebackup-auto.properties");
-        Files.writeString(legacy, "restore.countdownSeconds=5");
+        Files.writeString(legacy,
+                "restore.countdownSeconds=5\nautomation.joinStatusNotification.mode=enabled_only\n");
         assertTrue(Config.migrateLegacyConfig(target));
         assertTrue(Files.isRegularFile(target));
         assertFalse(Files.exists(legacy));
+        Properties migrated = new Properties();
+        try (var reader = Files.newBufferedReader(target)) {
+            migrated.load(reader);
+        }
+        assertEquals(Config.JoinStatusNotificationMode.ENABLED_ONLY,
+                Config.fromProperties(migrated).joinStatusNotificationMode());
         Files.writeString(legacy, "restore.countdownSeconds=7");
         assertFalse(Config.migrateLegacyConfig(target));
         assertTrue(Files.exists(legacy));

@@ -112,7 +112,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         coordinator.schedule(
                 () -> server.execute(() -> {
                     try {
-                        sendAutomationStatusWelcome(player);
+                        sendAutomationStatusWelcome(server, player);
                     } catch (RuntimeException | LinkageError exception) {
                         MineBackup.LOGGER.warn(
                                 "Failed to send automation status welcome message; continuing without it.",
@@ -123,83 +123,17 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                 TimeUnit.SECONDS);
     }
 
-    private void sendAutomationStatusWelcome(ServerPlayerEntity player) {
-        CurrentWorldAutomationState state = currentWorldAutomation();
-        if (!state.currentWorldAvailable()) {
+    private void sendAutomationStatusWelcome(MinecraftServer joiningServer, ServerPlayerEntity player) {
+        if (server != joiningServer || !operationsAvailable
+                || joiningServer.getPlayerManager().getPlayer(player.getUuid()) != player) {
             return;
         }
-
-        MutableText message;
-        if (state.mode() == CurrentWorldAutomationMode.OFF) {
-            message = Text.translatable("minebackup.message.auto.welcome.disabled");
-            message.append(Text.literal(" "));
-            ClickEvent clickEvent = TextEvents.suggestCommand("/mb auto start ");
-            HoverEvent hoverEvent = TextEvents.showText(
-                    Text.translatable("minebackup.message.auto.welcome.button.enable.hover"));
-            message.append(Text.translatable("minebackup.message.auto.welcome.button.enable")
-                    .styled(style -> {
-                        style = style.withColor(0x55FF55);
-                        if (clickEvent != null) {
-                            style = style.withClickEvent(clickEvent);
-                        }
-                        if (hoverEvent != null) {
-                            style = style.withHoverEvent(hoverEvent);
-                        }
-                        return style;
-                    }));
-        } else {
-            String modeKey = state.mode() == CurrentWorldAutomationMode.BACKUP
-                    ? "minebackup.message.auto.mode.backup"
-                    : "minebackup.message.auto.mode.remind";
-            long minutes = state.interval().orElseThrow().toMinutes();
-            String nextRun = state.nextRun()
-                    .map(instant -> {
-                        java.time.format.DateTimeFormatter formatter =
-                                java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
-                                        .withZone(java.time.ZoneId.systemDefault());
-                        return formatter.format(instant);
-                    })
-                    .orElseGet(() -> Text.translatable(
-                            "minebackup.message.auto.status.next_pending").getString());
-
-            message = Text.translatable(
-                    "minebackup.message.auto.welcome.enabled",
-                    Text.translatable(modeKey),
-                    minutes,
-                    nextRun);
-            message.append(Text.literal(" "));
-            ClickEvent disableClick = TextEvents.runCommand("/mb auto stop");
-            HoverEvent disableHover = TextEvents.showText(
-                    Text.translatable("minebackup.message.auto.welcome.button.disable.hover"));
-            message.append(Text.translatable("minebackup.message.auto.welcome.button.disable")
-                    .styled(style -> {
-                        style = style.withColor(0xFF5555);
-                        if (disableClick != null) {
-                            style = style.withClickEvent(disableClick);
-                        }
-                        if (disableHover != null) {
-                            style = style.withHoverEvent(disableHover);
-                        }
-                        return style;
-                    }));
-            message.append(Text.literal(" "));
-            ClickEvent configClick = TextEvents.suggestCommand("/mb auto start ");
-            HoverEvent configHover = TextEvents.showText(
-                    Text.translatable("minebackup.message.auto.welcome.button.config.hover"));
-            message.append(Text.translatable("minebackup.message.auto.welcome.button.config")
-                    .styled(style -> {
-                        style = style.withColor(0xFFFF55);
-                        if (configClick != null) {
-                            style = style.withClickEvent(configClick);
-                        }
-                        if (configHover != null) {
-                            style = style.withHoverEvent(configHover);
-                        }
-                        return style;
-                    }));
-        }
-
-        player.sendMessage(message, false);
+        AutomationWelcomeMessage.build(
+                        currentWorldAutomation(),
+                        Config.get().joinStatusNotificationMode(),
+                        CommandPermissions.canUse(
+                                player.getCommandSource(), CommandCapability.AUTOMATION))
+                .ifPresent(message -> player.sendMessage(message, false));
     }
 
     private void onServerStarting(MinecraftServer startingServer) {

@@ -41,7 +41,7 @@ This lightweight mod is a bridge between the **MineBackup desktop application** 
 * **Rich In-Game Commands**: Use the `/mb` command series to manage world saves directly from chat — backup, restore, browse history, and schedule automatic backups.
 * **Interactive Backup Browser**: `/mb list backups current` pages through your current world's backups right in chat, showing timestamps and comments (parsed automatically from standard backup file names) with a clickable **[Restore]** button next to each entry.
 * **Restore Safety Countdown**: Before a restore actually runs, MineBackup can count down a configurable number of seconds. Use `/mb stop` to cancel or `/mb confirm` to skip ahead and restore immediately.
-* **Smart Automation Welcome**: When you join a world, MineBackup shows you the automation status with clickable buttons — **[Enable Auto Backup]** if disabled, or **[Disable]** and **[Reconfigure]** if already running.
+* **Configurable Automation Welcome**: Show the world automation status on every join, only when a backup or reminder plan is enabled, or never. Management buttons appear only for players with automation permission. Reminder mode explicitly states that it does not create backups automatically.
 * **Flexible Automation Modes**: Choose between automatic backups or friendly reminders that let you pick the right moment.
 * **Full Dedicated Server Support**: Backup, restore, and browsing all work the same way on a dedicated server as they do in singleplayer, coordinated through a bundled restart sidecar (see below).
 * **Real-Time Backup Notifications**: Receive real-time messages from the main application in your game chat — whether a backup starts, succeeds, or fails.
@@ -53,13 +53,27 @@ This lightweight mod is a bridge between the **MineBackup desktop application** 
 | Loader | Minecraft Versions | Mappings |
 | :--- | :--- | :--- |
 | Fabric | 1.21 – 1.21.8 | Yarn |
-| Fabric | 1.21.9 – 1.21.10 | Mojang (official) |
 | Fabric | 1.21.11 | Mojang (official) |
 | Fabric | 26.1 – 26.1.2 | Mojang (unobfuscated) |
 | Fabric | 26.2 | Mojang (unobfuscated) |
+| Fabric | 26.3 | Mojang (unobfuscated) |
 | NeoForge | 1.21 – 1.21.8 | Parchment |
 | NeoForge | 26.1 – 26.1.2 | Mojang (unobfuscated) |
 | Forge | 1.20 – 1.20.4 | Mojang (official) |
+
+Fabric 1.21.9–1.21.10 was archived in 3.4.0; its historical 3.3.2 source is retained.
+
+### Join-status notifications (3.4.1)
+
+Set `automation.joinStatusNotification.mode` in the instance/server's
+`config/minebackup.properties` to `ALWAYS` (default), `ENABLED_ONLY`, or `NEVER`.
+`ENABLED_ONLY` displays the welcome for both automatic backup and reminder plans.
+Reopen the world or restart the server after editing. The server controls this
+setting for all players; client preferences do not override it. Players without
+automation permission still see the status text, without management buttons.
+This setting affects only the join-status message; scheduled reminders, backup
+results, failures, and restore safety messages keep their existing behavior.
+See the [configuration reference](Fabric/Fabric-26.1/docs/CONFIGURATION.md#join-status-notifications).
 
 ## 🚀 Installation Guide
 

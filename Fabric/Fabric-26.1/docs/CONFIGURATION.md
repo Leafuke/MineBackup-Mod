@@ -4,6 +4,9 @@ This reference applies only to MineBackup-Mod for Fabric on Minecraft
 26.1-26.1.2. The desktop MineBackup/FolderRewind application has its own
 configuration.
 
+The join-status notification setting introduced in 3.4.1 is also available on
+all other maintained mod targets; each target retains its own permission model.
+
 ## Files and loading
 
 - Global settings: `config/minebackup.properties`.
@@ -22,6 +25,7 @@ unrelated custom keys in `minebackup.properties`.
 
 | Key | Default | Accepted value | Applies to | Purpose |
 |---|---:|---|---|---|
+| `automation.joinStatusNotification.mode` | `ALWAYS` | `ALWAYS`, `ENABLED_ONLY`, `NEVER` | hosted singleplayer, LAN, dedicated server | Control only the automation status message sent on player join. |
 | `restore.countdownSeconds` | `10` | integer `0..300` | all environments | Delay before a current-world restore is submitted; `0` disables the countdown. |
 | `lan.hostReopen.enabled` | `true` | `true` or `false` | LAN host | Reopen LAN after an integrated-server restore. |
 | `lan.hostReopen.retryCount` | `6` | integer `1..30` | LAN host | Number of attempts to reopen the original LAN port. |
@@ -41,6 +45,32 @@ unrelated custom keys in `minebackup.properties`.
 Out-of-range integers are clamped to the documented range. Missing, blank, or
 malformed values use their defaults. See [Dedicated Restore](DEDICATED-RESTORE.md)
 for restart script and process-manager requirements.
+
+## Join-status notifications
+
+```properties
+automation.joinStatusNotification.mode=ALWAYS
+```
+
+| Value | Automation off | Automatic backup | Backup reminders |
+|---|---|---|---|
+| `ALWAYS` (default) | show | show | show |
+| `ENABLED_ONLY` | hide | show | show |
+| `NEVER` | hide | hide | hide |
+
+Values ignore case and surrounding whitespace. Missing, blank, or invalid values
+use `ALWAYS`; saving writes the canonical uppercase value. Existing configurations
+gain this key automatically, and legacy schedule migration preserves it.
+
+This is an instance-wide server setting, including the integrated server for
+singleplayer/LAN. Reopen the world or restart the dedicated server after editing.
+There is no per-world or per-player override. Scheduled reminders, backup results,
+failures, and restore safety messages are unaffected.
+
+Every player may receive the status text when the chosen mode allows it. Only
+players with `AUTOMATION` permission see enable/disable/reconfigure actions; these
+use the same permission check as `/mb auto`. Backup permission alone is insufficient.
+Reminder mode explicitly says that no automatic backups will be created.
 
 ## World automation
 
@@ -120,6 +150,10 @@ name before loading.
 
 ## Manual acceptance checklist
 
+- Exercise all three join notification preferences with automation off, automatic backups, and reminders.
+- Confirm unauthorized players receive status text without management actions, including players granted backup permission alone.
+- Leave or reconnect within the one-second welcome delay, and switch worlds; no message should reach a stale session.
+- With `NEVER`, confirm scheduled reminders, backup failures and restore safety messages still work.
 - Confirm the singleplayer owner can use commands without OP.
 - Confirm a LAN owner, LAN OP, and LAN ordinary player receive the expected capabilities.
 - Confirm dedicated-server console, OP2, and non-OP behavior.

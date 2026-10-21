@@ -28,6 +28,8 @@ public final class Config {
     private static final int CLIENT_RECONNECT_RETRY_INTERVAL_TICKS_DEFAULT = 100;
     private static final int CLIENT_RECONNECT_MAX_DURATION_TICKS_DEFAULT = 1800;
     private static final boolean UPDATE_CHECK_ENABLED_DEFAULT = true;
+    private static final JoinStatusNotificationMode JOIN_STATUS_NOTIFICATION_MODE_DEFAULT =
+            JoinStatusNotificationMode.ALWAYS;
     private static final int RESTORE_COUNTDOWN_SECONDS_DEFAULT = 10;
     private static final int SIDECAR_START_TIMEOUT_SECONDS_DEFAULT = 5;
     private static final int WORLD_RELEASE_TIMEOUT_SECONDS_DEFAULT = 8;
@@ -166,7 +168,9 @@ public final class Config {
                 hostReopen,
                 clientReconnect,
                 dedicatedRestore,
-                updateCheckEnabled);
+                updateCheckEnabled,
+                JoinStatusNotificationMode.parse(
+                        properties.getProperty("automation.joinStatusNotification.mode")));
     }
 
     static Properties toProperties(Snapshot snapshot) {
@@ -194,6 +198,9 @@ public final class Config {
         properties.setProperty("lan.clientReconnect.retryIntervalTicks", String.valueOf(client.retryIntervalTicks()));
         properties.setProperty("lan.clientReconnect.maxDurationTicks", String.valueOf(client.maxDurationTicks()));
         properties.setProperty("updateCheck.enabled", String.valueOf(snapshot.updateCheckEnabled()));
+        properties.setProperty(
+                "automation.joinStatusNotification.mode",
+                snapshot.joinStatusNotificationMode().name());
         DedicatedRestore dedicated = snapshot.dedicatedRestore();
         properties.setProperty("dedicatedRestore.mode", dedicated.mode().name());
         properties.setProperty("dedicatedRestore.restartScript", dedicated.restartScript());
@@ -298,7 +305,8 @@ public final class Config {
                         SIDECAR_START_TIMEOUT_SECONDS_DEFAULT,
                         WORLD_RELEASE_TIMEOUT_SECONDS_DEFAULT,
                         OPERATION_TIMEOUT_SECONDS_DEFAULT),
-                UPDATE_CHECK_ENABLED_DEFAULT);
+                UPDATE_CHECK_ENABLED_DEFAULT,
+                JOIN_STATUS_NOTIFICATION_MODE_DEFAULT);
     }
 
     private static String first(Properties properties, String canonicalKey, String legacyKey) {
@@ -335,12 +343,14 @@ public final class Config {
             HostReopen hostReopen,
             ClientReconnect clientReconnect,
             DedicatedRestore dedicatedRestore,
-            boolean updateCheckEnabled) {
+            boolean updateCheckEnabled,
+            JoinStatusNotificationMode joinStatusNotificationMode) {
         public Snapshot {
             Objects.requireNonNull(restore, "restore");
             Objects.requireNonNull(hostReopen, "hostReopen");
             Objects.requireNonNull(clientReconnect, "clientReconnect");
             Objects.requireNonNull(dedicatedRestore, "dedicatedRestore");
+            Objects.requireNonNull(joinStatusNotificationMode, "joinStatusNotificationMode");
         }
 
         public Snapshot withAutoBackup(AutoBackup value) {
@@ -350,7 +360,8 @@ public final class Config {
                     hostReopen,
                     clientReconnect,
                     dedicatedRestore,
-                    updateCheckEnabled);
+                    updateCheckEnabled,
+                    joinStatusNotificationMode);
         }
     }
 
@@ -382,6 +393,23 @@ public final class Config {
             int initialDelayTicks,
             int retryIntervalTicks,
             int maxDurationTicks) {
+    }
+
+    public enum JoinStatusNotificationMode {
+        ALWAYS,
+        ENABLED_ONLY,
+        NEVER;
+
+        static JoinStatusNotificationMode parse(String value) {
+            if (value == null || value.isBlank()) {
+                return JOIN_STATUS_NOTIFICATION_MODE_DEFAULT;
+            }
+            try {
+                return valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                return JOIN_STATUS_NOTIFICATION_MODE_DEFAULT;
+            }
+        }
     }
 
     public enum DedicatedRestoreMode {
