@@ -36,9 +36,27 @@ public final class ClientHooks {
         handler.restoreFailed(message);
     }
 
+    public static void requestRejoin(RestoreSession.RejoinInfo info, RestoreUiMessages messages,
+            java.util.function.BooleanSupplier current, java.util.function.BiConsumer<Boolean, String> completion) {
+        handler.requestRejoin(info, messages, current, completion);
+    }
+
+    public static void restoreFailed(Component message, java.util.function.BooleanSupplier current) {
+        handler.restoreFailed(message, current);
+    }
+
     public interface Handler {
         void requestRejoin(RestoreSession.RejoinInfo info, RestoreUiMessages messages);
 
         void restoreFailed(Component message);
+
+        default void requestRejoin(RestoreSession.RejoinInfo info, RestoreUiMessages messages,
+                java.util.function.BooleanSupplier current, java.util.function.BiConsumer<Boolean, String> completion) {
+            if (current.getAsBoolean()) requestRejoin(info, messages);
+        }
+
+        default void restoreFailed(Component message, java.util.function.BooleanSupplier current) {
+            if (current.getAsBoolean()) restoreFailed(message);
+        }
     }
 }

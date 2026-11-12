@@ -146,5 +146,6 @@
   "minebackup.help.summary.list_backups": "List backups for the current world or a selected folder",
   "minebackup.help.summary.auto_start": "Schedule backups or reminders for the current world",
   "minebackup.help.summary.auto_stop": "Stop and clear automation for the current world",
-  "minebackup.help.summary.auto_status": "Show automation for the current world"
+  "minebackup.help.summary.auto_status": "Show automation for the current world",
+  "minebackup.broadcast.backup.unconfirmed": "Automatic saving has resumed because the backup timed out. This backup was not confirmed; verify it in the backend before restoring."
 }

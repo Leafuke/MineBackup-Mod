@@ -1,32 +1,22 @@
 package com.leafuke.minebackup.runtime;
 
 import com.leafuke.minebackup.MineBackup;
-import net.minecraft.text.Text;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class AutoSaveController {
-    private static final long FREEZE_TIMEOUT_NANOS = Duration.ofMinutes(10).toNanos();
-
     private final List<ServerWorld> frozenLevels = new ArrayList<>();
-    private final Runnable timeoutListener;
     private boolean frozen;
-    private long freezeDeadlineNanos;
-
-    public AutoSaveController() {
-        this(() -> {
-        });
-    }
-
-    public AutoSaveController(Runnable timeoutListener) {
-        this.timeoutListener = java.util.Objects.requireNonNull(timeoutListener, "timeoutListener");
-    }
+    private Object owner;
 
     public synchronized boolean freeze(MinecraftServer server) {
+        return freeze(server, this);
+    }
+
+    public synchronized boolean freeze(MinecraftServer server, Object token) {
         if (frozen) {
             MineBackup.LOGGER.warn("Ignoring duplicate request to freeze auto-save.");
             return false;
@@ -40,7 +30,7 @@ public final class AutoSaveController {
             }
         }
         frozen = true;
-        freezeDeadlineNanos = System.nanoTime() + FREEZE_TIMEOUT_NANOS;
+        owner = java.util.Objects.requireNonNull(token);
         MineBackup.LOGGER.info("Auto-save frozen for {} dimensions.", frozenLevels.size());
         return true;
     }
@@ -56,7 +46,7 @@ public final class AutoSaveController {
         }
         frozenLevels.clear();
         frozen = false;
-        freezeDeadlineNanos = 0L;
+        owner = null;
         MineBackup.LOGGER.info("Auto-save resumed.");
         return true;
     }
@@ -65,21 +55,7 @@ public final class AutoSaveController {
         return frozen;
     }
 
-    public void tick(MinecraftServer server) {
-        boolean timedOut;
-        synchronized (this) {
-            timedOut = frozen && System.nanoTime() >= freezeDeadlineNanos;
-        }
-        if (!timedOut) {
-            return;
-        }
-
-        MineBackup.LOGGER.error("Auto-save freeze timed out; forcing resume.");
-        if (unfreeze()) {
-            timeoutListener.run();
-            server.getPlayerManager().broadcast(
-                    Text.translatable("minebackup.broadcast.autosave.timeout"),
-                    false);
-        }
+    public synchronized boolean unfreeze(Object token) {
+        return token != null && token.equals(owner) && unfreeze();
     }
 }

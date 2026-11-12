@@ -141,5 +141,6 @@
   "minebackup.help.summary.list_backups": "列出当前世界或指定文件夹中的备份",
   "minebackup.help.summary.auto_start": "为当前世界定时备份或提醒",
   "minebackup.help.summary.auto_stop": "停止并清除当前世界自动化计划",
-  "minebackup.help.summary.auto_status": "查看当前世界的自动化计划"
+  "minebackup.help.summary.auto_status": "查看当前世界的自动化计划",
+  "minebackup.broadcast.backup.unconfirmed": "备份等待超时，已恢复自动保存。本次备份尚未确认成功，请在主程序中核实后再用于还原。"
 }

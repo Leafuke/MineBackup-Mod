@@ -3,8 +3,13 @@ name: MineBackup reliability checks
 on:
   push:
     paths:
+      - "Fabric/Fabric-1.21/**"
+      - "Fabric/Fabric-1.21.11/**"
       - "Fabric/Fabric-26.1/**"
+      - "Fabric/Fabric-26.2/**"
+      - "Fabric/Fabric-26.3/**"
       - "Neoforge/NeoForge-1.21/**"
+      - "Neoforge/NeoForge-26.1/**"
       - "Forge/Forge-1.20/**"
       - "tests/**"
       - ".github/workflows/fabric-26.1-check.yml"
@@ -18,8 +23,13 @@ on:
       - "Forge/**/src/main/resources/assets/minebackup/lang/**"
   pull_request:
     paths:
+      - "Fabric/Fabric-1.21/**"
+      - "Fabric/Fabric-1.21.11/**"
       - "Fabric/Fabric-26.1/**"
+      - "Fabric/Fabric-26.2/**"
+      - "Fabric/Fabric-26.3/**"
       - "Neoforge/NeoForge-1.21/**"
+      - "Neoforge/NeoForge-26.1/**"
       - "Forge/Forge-1.20/**"
       - "tests/**"
       - ".github/workflows/fabric-26.1-check.yml"
@@ -42,10 +52,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - project: Fabric/Fabric-1.21
+            java: "21"
+          - project: Fabric/Fabric-1.21.11
+            java: "21"
           - project: Fabric/Fabric-26.1
+            java: "25"
+          - project: Fabric/Fabric-26.2
+            java: "25"
+          - project: Fabric/Fabric-26.3
             java: "25"
           - project: Neoforge/NeoForge-1.21
             java: "21"
+          - project: Neoforge/NeoForge-26.1
+            java: "25"
           - project: Forge/Forge-1.20
             java: "17"
     defaults:

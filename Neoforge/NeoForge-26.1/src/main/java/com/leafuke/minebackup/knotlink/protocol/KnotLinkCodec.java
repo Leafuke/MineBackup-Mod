@@ -6,8 +6,10 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 public final class KnotLinkCodec {
     private static final char[] HEX = "0123456789ABCDEF".toCharArray();
@@ -48,10 +50,19 @@ public final class KnotLinkCodec {
         if (fields == null || fields.isEmpty()) {
             throw new IllegalArgumentException("KnotLink fields must not be empty");
         }
+        Map<String, FieldValue> values = new LinkedHashMap<>();
+        fields.forEach((key, value) -> values.put(key, new ScalarValue(value)));
+        return serializeFields(values);
+    }
+
+    static String serializeFields(Map<String, FieldValue> fields) {
+        if (fields == null || fields.isEmpty()) {
+            throw new IllegalArgumentException("KnotLink fields must not be empty");
+        }
 
         StringBuilder result = new StringBuilder();
         Map<String, Boolean> seen = new LinkedHashMap<>();
-        for (Map.Entry<String, String> field : fields.entrySet()) {
+        for (Map.Entry<String, FieldValue> field : fields.entrySet()) {
             String key = normalizeKey(field.getKey());
             if (!isValidKey(key)) {
                 throw new IllegalArgumentException("Invalid KnotLink key: " + field.getKey());
@@ -63,9 +74,39 @@ public final class KnotLinkCodec {
             if (!result.isEmpty()) {
                 result.append(';');
             }
-            result.append(key).append('=').append(encodeValue(field.getValue()));
+            result.append(key).append('=').append(field.getValue().encode());
         }
         return result.toString();
+    }
+
+    public static String encodeList(List<String> values) {
+        Objects.requireNonNull(values, "values");
+        return values.stream()
+                .filter(value -> !value.isBlank())
+                .map(KnotLinkCodec::encodeValue)
+                .collect(java.util.stream.Collectors.joining(","));
+    }
+
+    sealed interface FieldValue permits ScalarValue, ListValue {
+        String encode();
+    }
+
+    record ScalarValue(String value) implements FieldValue {
+        @Override
+        public String encode() {
+            return encodeValue(value);
+        }
+    }
+
+    record ListValue(List<String> values) implements FieldValue {
+        ListValue {
+            values = List.copyOf(values);
+        }
+
+        @Override
+        public String encode() {
+            return encodeList(values);
+        }
     }
 
     public static String encodeValue(String value) {

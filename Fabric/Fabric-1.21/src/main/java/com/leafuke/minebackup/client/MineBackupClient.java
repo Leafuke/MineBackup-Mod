@@ -25,6 +25,17 @@ public final class MineBackupClient implements ClientModInitializer {
         Config.Snapshot config = Config.load();
         ClientHooks.register(new ClientHooks.Handler() {
             @Override
+            public void requestRejoin(RestoreSession.RejoinInfo info, RestoreUiMessages messages,
+                    java.util.function.BooleanSupplier current, java.util.function.BiConsumer<Boolean, String> completion) {
+                ClientRejoinController.requestRejoin(MinecraftClient.getInstance(), info, messages, current, completion);
+            }
+
+            @Override
+            public void restoreFailed(Text message, java.util.function.BooleanSupplier current) {
+                ClientRejoinController.restoreFailed(MinecraftClient.getInstance(), message, current);
+            }
+
+            @Override
             public void requestRejoin(RestoreSession.RejoinInfo info, RestoreUiMessages messages) {
                 MinecraftClient client = MinecraftClient.getInstance();
                 if (client != null) {

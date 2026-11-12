@@ -18,16 +18,19 @@ final class ApiParameterSupport {
             Objects.requireNonNull(value, "parameter value");
             String safeKey = key.trim().toLowerCase(Locale.ROOT);
             String safeValue = value.trim();
-            if (safeKey.isEmpty() || safeValue.isEmpty()) {
+            if (!safeKey.matches("[a-z0-9_]+") || safeValue.isEmpty()) {
                 throw new IllegalArgumentException("FolderRewind parameters must not be blank");
             }
             if (reserved.contains(safeKey)
+                    || "cmd".equals(safeKey)
                     || "current_save".equals(safeKey)
                     || "request_id".equals(safeKey)
                     || "from".equals(safeKey)) {
                 throw new IllegalArgumentException("Reserved FolderRewind parameter: " + safeKey);
             }
-            normalized.put(safeKey, safeValue);
+            if (normalized.putIfAbsent(safeKey, safeValue) != null) {
+                throw new IllegalArgumentException("Duplicate FolderRewind parameter: " + safeKey);
+            }
         });
         return Map.copyOf(normalized);
     }

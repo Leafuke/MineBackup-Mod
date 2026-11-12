@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Pure-JDK restore handoff process. This class must not reference Fabric or
- * MinecraftClient classes because it runs after the server JVM starts shutting down.
+ * Minecraft classes because it runs after the server JVM starts shutting down.
  */
 public final class DedicatedRestoreSidecar {
     private static final String HOST = "127.0.0.1";
@@ -44,7 +44,7 @@ public final class DedicatedRestoreSidecar {
 
     static void run(DedicatedRestoreStore store, DedicatedRestoreSession original) throws Exception {
         SidecarSignalTracker signals =
-                new SidecarSignalTracker(original.requestId(), original.worldId());
+                new SidecarSignalTracker(store.signalRequestId(original), store.signalFrom(), original.worldId());
         AtomicBoolean disconnected = new AtomicBoolean();
 
         try (SignalSubscriber subscriber =
@@ -61,7 +61,7 @@ public final class DedicatedRestoreSidecar {
             subscriber.start();
 
             store.writeActive(original.withState(DedicatedRestoreSession.State.READY, ""));
-            store.markReady();
+            store.markReady(original.requestId());
             DedicatedRestoreSession waiting =
                     original.withState(DedicatedRestoreSession.State.WAITING_FOR_RELEASE, "");
             store.writeActive(waiting);
@@ -90,21 +90,25 @@ public final class DedicatedRestoreSidecar {
                 Thread.sleep(100L);
             }
 
-            KnotLinkResponse release;
-            try {
-                release = query(
-                        KnotLinkRequest.command("WORLD_SAVE_AND_EXIT_COMPLETE")
-                                .conversation(original.requestId()));
-            } catch (Exception exception) {
-                uncertain(store, original, "World release acknowledgement failed: " + exception.getMessage());
-                return;
+            // Cancellation before shutdown means no mutation will start. Once the parent
+            // and files are released it is safe to restart without an obsolete release ACK.
+            if (signals.terminal().orElse(null) != SidecarSignalTracker.Outcome.CANCELLED) {
+                signals.releaseRequested();
+                try {
+                    KnotLinkResponse release = query(KnotLinkRequest.command("WORLD_SAVE_AND_EXIT_COMPLETE")
+                            .conversation(original.requestId()));
+                    if (!release.isOk() && signals.terminal().isEmpty()) {
+                        uncertain(store, original, "Backend rejected world release: " + release.displayMessage());
+                        return;
+                    }
+                } catch (Exception exception) {
+                    if (signals.terminal().isEmpty()) {
+                        uncertain(store, original, "World release acknowledgement failed: " + exception.getMessage());
+                        return;
+                    }
+                }
+                store.writeActive(original.withState(DedicatedRestoreSession.State.RELEASE_ACKNOWLEDGED, ""));
             }
-            if (!release.isOk()) {
-                uncertain(store, original, "Backend rejected world release: " + release.displayMessage());
-                return;
-            }
-            store.writeActive(original.withState(
-                    DedicatedRestoreSession.State.RELEASE_ACKNOWLEDGED, ""));
 
             while (signals.terminal().isEmpty()) {
                 if (disconnected.get() || System.nanoTime() >= deadline) {

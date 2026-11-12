@@ -1,6 +1,5 @@
 package com.leafuke.minebackup.runtime;
 
-import com.leafuke.minebackup.MineBackup;
 import com.leafuke.minebackup.api.v2.AutoBackupState;
 import com.leafuke.minebackup.api.v2.BackupRequest;
 import com.leafuke.minebackup.api.v2.BackupResult;
@@ -27,6 +26,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 final class AutoBackupScheduler implements AutoCloseable {
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("minebackup");
     private static final String CALLER_ID = "minebackup:auto";
 
     private final CurrentWorldOperationCoordinator operations;
@@ -85,7 +85,7 @@ final class AutoBackupScheduler implements AutoCloseable {
                     server.getWorldPath(LevelResource.ROOT),
                     server.getWorldData().getLevelName());
         } catch (IOException exception) {
-            MineBackup.LOGGER.error("Failed to identify the current world for automation", exception);
+            LOGGER.error("Failed to identify the current world for automation", exception);
             serverActive = true;
             activeWorld = null;
             settings = WorldAutomationConfigStore.Settings.off();
@@ -206,7 +206,7 @@ final class AutoBackupScheduler implements AutoCloseable {
         } catch (RejectedExecutionException exception) {
             future = null;
             nextRun = null;
-            MineBackup.LOGGER.warn("Current-world automation scheduler rejected a task", exception);
+            LOGGER.warn("Current-world automation scheduler rejected a task", exception);
         }
     }
 
@@ -226,7 +226,7 @@ final class AutoBackupScheduler implements AutoCloseable {
             try {
                 reminderNotifier.run();
             } catch (RuntimeException exception) {
-                MineBackup.LOGGER.warn("Failed to send automatic backup reminder", exception);
+                LOGGER.warn("Failed to send automatic backup reminder", exception);
             }
             rearmIfCurrent(expectedGeneration, expectedWorld, expectedSettings);
             return;
@@ -236,16 +236,16 @@ final class AutoBackupScheduler implements AutoCloseable {
                 .completion()
                 .whenComplete((result, error) -> {
                     if (error != null) {
-                        MineBackup.LOGGER.warn("Automatic hot backup handle failed", error);
+                        LOGGER.warn("Automatic hot backup handle failed", error);
                     } else if (result.outcome() == BackupResult.Outcome.REJECTED
                             && result.failure()
                             .map(OperationFailure::code)
                             .filter(code -> code == OperationFailure.Code.BUSY)
                             .isPresent()) {
-                        MineBackup.LOGGER.info(
+                        LOGGER.info(
                                 "Skipped automatic hot backup because another current-world operation is active.");
                     } else if (!isEffectiveBackup(result)) {
-                        MineBackup.LOGGER.warn(
+                        LOGGER.warn(
                                 "Automatic hot backup ended with outcome {}: {}",
                                 result.outcome(),
                                 result.failure().map(OperationFailure::message).orElse("no details"));

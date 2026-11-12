@@ -21,6 +21,9 @@ public final class DedicatedRestoreStore {
     public static final String READY_FILE = "sidecar.ready";
 
     private final Path directory;
+    private String wireRequestId;
+    private String wireFrom;
+    private boolean wireIdentityRecorded;
 
     public DedicatedRestoreStore(Path directory) {
         this.directory = directory.toAbsolutePath().normalize();
@@ -41,6 +44,19 @@ public final class DedicatedRestoreStore {
     public void writeActive(DedicatedRestoreSession session) throws IOException {
         write(activePath(), session);
     }
+
+    public void writeActive(DedicatedRestoreSession session, String requestId, String from) throws IOException {
+        wireIdentityRecorded = true;
+        wireRequestId = requestId;
+        wireFrom = from;
+        writeActive(session);
+    }
+
+    String signalRequestId(DedicatedRestoreSession session) {
+        return wireIdentityRecorded ? wireRequestId : session.requestId().toString();
+    }
+
+    String signalFrom() { return wireFrom; }
 
     public void writeFinal(DedicatedRestoreSession session) throws IOException {
         write(directory.resolve(LAST_RESULT_FILE), session);
@@ -64,12 +80,21 @@ public final class DedicatedRestoreStore {
                 StandardCharsets.UTF_8);
     }
 
+    public void markReady(UUID requestId) throws IOException {
+        Files.writeString(readyPath(), requestId.toString(), StandardCharsets.UTF_8);
+    }
+
+    public boolean readyFor(UUID requestId) throws IOException {
+        return Files.isRegularFile(readyPath())
+                && Files.readString(readyPath(), StandardCharsets.UTF_8).equals(requestId.toString());
+    }
+
     public void clearTransient() throws IOException {
         Files.deleteIfExists(activePath());
         Files.deleteIfExists(readyPath());
     }
 
-    private static void write(Path target, DedicatedRestoreSession session) throws IOException {
+    private void write(Path target, DedicatedRestoreSession session) throws IOException {
         Files.createDirectories(target.getParent());
         Properties values = new Properties();
         values.setProperty("requestId", session.requestId().toString());
@@ -83,6 +108,11 @@ public final class DedicatedRestoreStore {
         values.setProperty("state", session.state().name());
         values.setProperty("updatedAt", session.updatedAt().toString());
         values.setProperty("detail", session.detail());
+        if (wireIdentityRecorded) {
+            values.setProperty("wireIdentityRecorded", "true");
+            if (wireRequestId != null) values.setProperty("wireRequestId", wireRequestId);
+            if (wireFrom != null) values.setProperty("wireFrom", wireFrom);
+        }
         values.setProperty("restartCommand.count", String.valueOf(session.restartCommand().size()));
         for (int index = 0; index < session.restartCommand().size(); index++) {
             values.setProperty("restartCommand." + index, session.restartCommand().get(index));
@@ -102,7 +132,7 @@ public final class DedicatedRestoreStore {
         }
     }
 
-    private static Optional<DedicatedRestoreSession> read(Path path) throws IOException {
+    private Optional<DedicatedRestoreSession> read(Path path) throws IOException {
         if (!Files.isRegularFile(path)) {
             return Optional.empty();
         }
@@ -110,6 +140,9 @@ public final class DedicatedRestoreStore {
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             values.load(reader);
         }
+        wireIdentityRecorded = Boolean.parseBoolean(values.getProperty("wireIdentityRecorded", "false"));
+        wireRequestId = values.getProperty("wireRequestId");
+        wireFrom = values.getProperty("wireFrom");
         int count = Integer.parseInt(values.getProperty("restartCommand.count"));
         List<String> command = new ArrayList<>(count);
         for (int index = 0; index < count; index++) {

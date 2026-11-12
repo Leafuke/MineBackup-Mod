@@ -26,6 +26,9 @@ public final class ClientRejoinController {
     private static int elapsedTicks;
     private static int attempts;
     private static boolean resultReported;
+    private static java.util.function.BooleanSupplier currentSession = () -> true;
+    private static java.util.function.BiConsumer<Boolean, String> completion = MineBackup::completeClientRestore;
+    private static long clientGeneration;
 
     private static boolean pendingLanReopen;
     private static int lanReopenWaitTicks;
@@ -40,12 +43,21 @@ public final class ClientRejoinController {
             Minecraft client,
             RestoreSession.RejoinInfo info,
             RestoreUiMessages messages) {
+        requestRejoin(client, info, messages, () -> true, MineBackup::completeClientRestore);
+    }
+
+    public static void requestRejoin(Minecraft client, RestoreSession.RejoinInfo info, RestoreUiMessages messages,
+            java.util.function.BooleanSupplier current, java.util.function.BiConsumer<Boolean, String> finished) {
         client.execute(() -> {
+            if (!current.getAsBoolean()) return;
             if (state != State.IDLE) {
                 MineBackup.LOGGER.warn("Rejected duplicate client rejoin request.");
                 return;
             }
             state = State.DELAYING;
+            currentSession = current;
+            completion = finished;
+            clientGeneration++;
             resultReported = false;
             String levelId = sanitizeLevelId(info.levelId());
             if (levelId == null) {
@@ -68,7 +80,12 @@ public final class ClientRejoinController {
     }
 
     public static void restoreFailed(Minecraft client, Component message) {
+        restoreFailed(client, message, () -> true);
+    }
+
+    public static void restoreFailed(Minecraft client, Component message, java.util.function.BooleanSupplier current) {
         client.execute(() -> {
+            if (!current.getAsBoolean()) return;
             resetRejoinState();
             resetLanReopenState();
             if (client.player != null) {
@@ -92,6 +109,7 @@ public final class ClientRejoinController {
             return;
         }
 
+        if (!currentSession.getAsBoolean()) { resetRejoinState(); resetLanReopenState(); return; }
         elapsedTicks++;
         if (elapsedTicks >= REJOIN_DEADLINE_TICKS) {
             finishFailure(client, "timeout");
@@ -132,8 +150,10 @@ public final class ClientRejoinController {
         state = State.OPENING;
         client.setScreen(new GenericMessageScreen(uiMessages.rejoining()));
         try {
-            client.createWorldOpenFlows().openWorld(levelId, () ->
-                    client.execute(() -> finishFailure(client, "cancelled")));
+            long generation = clientGeneration;
+            client.createWorldOpenFlows().openWorld(levelId, () -> client.execute(() -> {
+                if (clientGeneration == generation && currentSession.getAsBoolean()) finishFailure(client, "cancelled");
+            }));
         } catch (RuntimeException exception) {
             MineBackup.LOGGER.warn(
                     "Synchronous world rejoin attempt {}/{} failed",
@@ -151,6 +171,7 @@ public final class ClientRejoinController {
     }
 
     private static void finishSuccess(Minecraft client) {
+        if (!currentSession.getAsBoolean()) { resetRejoinState(); resetLanReopenState(); return; }
         if (state != State.OPENING) {
             return;
         }
@@ -158,25 +179,28 @@ public final class ClientRejoinController {
         Component successMessage = uiMessages == null
                 ? Component.translatable("minebackup.message.restore.success_overlay")
                 : uiMessages.succeeded();
+        var finished = completion;
         reportResult("success", null);
         resetRejoinState();
         if (completedInfo != null) {
             scheduleLanReopen(completedInfo);
         }
-        MineBackup.completeClientRestore(true, null);
+        finished.accept(true, null);
         if (client.player != null) {
             client.player.sendSystemMessage(successMessage);
         }
     }
 
     private static void finishFailure(Minecraft client, String reason) {
+        if (!currentSession.getAsBoolean()) { resetRejoinState(); resetLanReopenState(); return; }
         if (state == State.IDLE) {
             return;
         }
+        var finished = completion;
         reportResult("failure", reason);
         resetRejoinState();
         resetLanReopenState();
-        MineBackup.completeClientRestore(false, reason);
+        finished.accept(false, reason);
         try {
             client.setScreen(new SelectWorldScreen(new TitleScreen()));
         } catch (RuntimeException exception) {
@@ -206,6 +230,9 @@ public final class ClientRejoinController {
     }
 
     private static void resetRejoinState() {
+        clientGeneration++;
+        currentSession = () -> true;
+        completion = MineBackup::completeClientRestore;
         state = State.IDLE;
         rejoinInfo = null;
         uiMessages = null;
