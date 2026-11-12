@@ -84,3 +84,5 @@ publishing {
 		// retrieving dependencies.
 	}
 }
+
+apply from: '../../tests/shared-tests.gradle'

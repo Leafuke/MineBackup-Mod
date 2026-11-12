@@ -1,9 +1,12 @@
-name: Fabric 26.1 check
+name: MineBackup reliability checks
 
 on:
   push:
     paths:
       - "Fabric/Fabric-26.1/**"
+      - "Neoforge/NeoForge-1.21/**"
+      - "Forge/Forge-1.20/**"
+      - "tests/**"
       - ".github/workflows/fabric-26.1-check.yml"
       - ".github/workflows/release-maintained-builds.yml"
       - "scripts/check_join_notification_parity.py"
@@ -16,6 +19,9 @@ on:
   pull_request:
     paths:
       - "Fabric/Fabric-26.1/**"
+      - "Neoforge/NeoForge-1.21/**"
+      - "Forge/Forge-1.20/**"
+      - "tests/**"
       - ".github/workflows/fabric-26.1-check.yml"
       - ".github/workflows/release-maintained-builds.yml"
       - "scripts/check_join_notification_parity.py"
@@ -32,9 +38,19 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: Fabric/Fabric-26.1
+            java: "25"
+          - project: Neoforge/NeoForge-1.21
+            java: "21"
+          - project: Forge/Forge-1.20
+            java: "17"
     defaults:
       run:
-        working-directory: Fabric/Fabric-26.1
+        working-directory: ${{ matrix.project }}
 
     steps:
       - name: Check out repository
@@ -43,11 +59,11 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v6
 
-      - name: Set up Java 25
+      - name: Set up Java ${{ matrix.java }}
         uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: ${{ matrix.java }}
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6

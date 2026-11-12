@@ -208,3 +208,5 @@ idea {
         downloadJavadoc = true
     }
 }
+
+apply from: '../../tests/shared-tests.gradle'

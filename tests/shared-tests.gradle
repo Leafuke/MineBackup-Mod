@@ -1,0 +1,33 @@
+// Compile the same behavioral contracts against each loader's own production classes.
+sourceSets.test.java.srcDir file('../../tests/shared/java')
+// ModDevGradle wires game libraries into main's compile classpath, not plain Java tests.
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.compileClasspath
+repositories {
+    exclusiveContent {
+        forRepository { mavenCentral() }
+        filter {
+            includeGroupByRegex 'org\\.junit(\\..*)?'
+            includeGroup 'org.opentest4j'
+            includeGroup 'org.apiguardian'
+        }
+    }
+}
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.14.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    if (!file('src/main/resources/fabric.mod.json').exists()) {
+        testRuntimeOnly('cpw.mods:securejarhandler:' +
+                (file('src/main/templates/META-INF/neoforge.mods.toml').exists() ? '3.0.8' : '2.1.6')) {
+            transitive = false
+        }
+    }
+}
+tasks.named('test') {
+    useJUnitPlatform()
+    dependsOn tasks.named('jar')
+    systemProperty 'minebackup.test.jar', tasks.named('jar').get().archiveFile.get().asFile.absolutePath
+    systemProperty 'minebackup.test.unionRequired', !file('src/main/resources/fabric.mod.json').exists()
+    jvmArgs '--add-opens=java.base/java.lang.invoke=ALL-UNNAMED'
+}

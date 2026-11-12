@@ -5,6 +5,15 @@ unreleased v1 API and deliberately exposes no Minecraft, Fabric, KnotLink, or
 chat component types. Completion callbacks are not guaranteed to run on a game
 thread.
 
+Current-world mutations require a connected signal channel before submission.
+Operation completion is bounded; a timeout is a failed, unconfirmed result, not
+proof that the backend stopped or that an archive is safe. Hot-backup timeout
+resumes automatic saving. No automatic retry is performed, and a late receipt
+cannot change an already-completed handle. Cleanup releases the originating
+session before invoking completion callbacks. Existing API v2 signatures and
+result types are unchanged. See [reliability validation](RELIABILITY-VALIDATION.md)
+for deadlines, legacy signal limitations, and real-game acceptance status.
+
 ```java
 MineBackupApi api = MineBackupApi.getInstance();
 BackupRequest request = BackupRequest.create(

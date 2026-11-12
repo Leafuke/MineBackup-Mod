@@ -15,6 +15,7 @@ class SidecarSignalTrackerTest {
     void ignoresWrongRequestWorldAndDuplicateTerminalSignals() {
         UUID request = UUID.randomUUID();
         SidecarSignalTracker tracker = new SidecarSignalTracker(request, "world");
+        tracker.releaseRequested();
         tracker.accept(Map.of(
                 "event", "restore_finished",
                 "request_id", UUID.randomUUID().toString(),
@@ -45,6 +46,7 @@ class SidecarSignalTrackerTest {
     @Test
     void buffersRejoinBeforeTerminal() {
         SidecarSignalTracker tracker = new SidecarSignalTracker(UUID.randomUUID(), "world");
+        tracker.releaseRequested();
         tracker.accept(Map.of("event", "rejoin_world", "world", "world"));
         assertTrue(tracker.rejoinRequested());
         assertFalse(tracker.terminal().isPresent());

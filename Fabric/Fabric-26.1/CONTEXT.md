@@ -8,6 +8,12 @@ MineBackup coordinates safe Minecraft world snapshots and restores with the Fold
 A backup or restore whose target is the Minecraft world currently hosted by this game process.
 _Avoid_: Remote command, generic task
 
+**World-operation session**:
+The coordinator-owned operation identity, server generation, handshake/restore
+phase, freeze ownership, and deadline. A callback or signal must belong to this
+session before it may change world state; public handle completion follows cleanup.
+_Avoid_: Independent restore flags, global freeze completion
+
 **Hot backup**:
 A current-world backup taken after Minecraft saves the world and temporarily freezes automatic saving, without closing the world.
 _Avoid_: Quick backup, live copy

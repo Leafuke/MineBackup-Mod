@@ -62,8 +62,9 @@ Never assume silence means FolderRewind failed safely.
    gate before submitting `RESTORE current_save`.
 2. On matching `pre_hot_restore`, it validates again and saves players and all
    worlds.
-3. It atomically persists the session, launches the sidecar, and waits for its
-   ready marker.
+3. A background worker atomically persists the session, launches the sidecar, and
+   waits for a ready marker matching the session UUID. The game thread does not
+   wait for child-process startup. A canceled/failed startup kills its child.
 4. Only then does it broadcast preparation, disconnect players, complete the
    in-process handle as `RESTART_HANDOFF_ACCEPTED`, and call
    `server.halt(false)`.
@@ -71,3 +72,8 @@ Never assume silence means FolderRewind failed safely.
    probes before acknowledging world release once.
 6. An explicit success, failure, or cancellation permits one script launch.
    An unknown outcome keeps the server offline.
+
+The sidecar classpath uses the physical mod JAR, including on NeoForge/Forge;
+loader virtual file-system roots cannot be passed to a standalone JVM. Optional
+wire-identity fields preserve opaque remote request IDs without changing the
+public handoff record constructor or replaying historical sessions.
