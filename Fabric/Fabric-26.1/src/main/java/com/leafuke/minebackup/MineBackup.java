@@ -1,17 +1,19 @@
 package com.leafuke.minebackup;
 
-import com.leafuke.minebackup.command.Command;
-import com.leafuke.minebackup.api.v2.MineBackupApi;
 import com.leafuke.minebackup.api.v2.CurrentWorldAutomationMode;
-import com.leafuke.minebackup.knotlink.KnotLinkClient;
-import com.leafuke.minebackup.runtime.MineBackupRuntime;
+import com.leafuke.minebackup.api.v2.MineBackupApi;
+import com.leafuke.minebackup.command.Command;
 import com.leafuke.minebackup.runtime.AutoBackupUpdateResult;
 import com.leafuke.minebackup.runtime.AutomationUpdateResult;
+import com.leafuke.minebackup.runtime.InteropRequests;
+import com.leafuke.minebackup.runtime.MineBackupRuntime;
 import com.leafuke.minebackup.runtime.RestoreControlResult;
+
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,10 +32,14 @@ public final class MineBackup implements ModInitializer {
         CommandRegistrationCallback.EVENT.register(
                 (dispatcher, registryAccess, environment) -> Command.register(dispatcher));
         RUNTIME.registerEvents();
-        LOGGER.info("MineBackup {} initialized with KnotLink v2.", ModInfo.version());
+        LOGGER.info("MineBackup {} initialized with Minecraft interop v3.", ModInfo.version());
     }
 
-    public static KnotLinkClient knotLink() {
+    public static MineBackupRuntime.ExitPermission openingPermission(java.nio.file.Path root) {
+        return RUNTIME.openingPermission(root);
+    }
+
+    public static InteropRequests knotLink() {
         return RUNTIME.knotLink();
     }
 

@@ -36,9 +36,13 @@ public final class InteropClient implements AutoCloseable {
         }
     }
 
-    public record Observation(String backend,InteropSnapshot snapshot) {}
+    public record Observation(String backend, InteropSnapshot snapshot) {}
+
     private volatile Observation latest;
-    public Observation latest(){return latest;}
+
+    public Observation latest() {
+        return latest;
+    }
 
     public record Status(String code, String detail, List<Choice> choices) {}
 
@@ -289,7 +293,8 @@ public final class InteropClient implements AutoCloseable {
         for (Endpoint endpoint : routes) {
             try {
                 var hello = hello(endpoint);
-                if(!verifiedDomains.add(endpoint.domain()))throw new Rejection("target_ambiguous");
+                if (!verifiedDomains.add(endpoint.domain()))
+                    throw new Rejection("target_ambiguous");
                 String ready = string(hello, "minecraftInterop");
                 if (!ready.equals("ready")) {
                     problem =
@@ -325,9 +330,13 @@ public final class InteropClient implements AutoCloseable {
                     detail = endpoint.display();
                 }
             } catch (Exception error) {
-                if(error instanceof Rejection failure && failure.code().equals("target_ambiguous")){
-                    synchronized(this){binding=null;detachSignal();}
-                    return setStatus("target_ambiguous",endpoint.display(),List.of());
+                if (error instanceof Rejection failure
+                        && failure.code().equals("target_ambiguous")) {
+                    synchronized (this) {
+                        binding = null;
+                        detachSignal();
+                    }
+                    return setStatus("target_ambiguous", endpoint.display(), List.of());
                 }
                 unverified = true;
                 problem = code(error);
@@ -706,11 +715,12 @@ public final class InteropClient implements AutoCloseable {
                     if (b.id() != null) body.addProperty("bindingId", b.id().toString());
                     if (binding != b) throw new Rejection("stale_binding");
                     var w = new Watch(b.endpoint(), b.world().session(), id, kind, targetRef);
-                    synchronized(watches){
-                        if(watches.containsKey(id) || Files.exists(pointer(id)))throw new Rejection("request_conflict");
+                    synchronized (watches) {
+                        if (watches.containsKey(id) || Files.exists(pointer(id)))
+                            throw new Rejection("request_conflict");
                         w.busy.set(true);
                         persist(w);
-                        watches.put(id,w);
+                        watches.put(id, w);
                     }
                     try {
                         JsonObject receipt;
@@ -790,8 +800,14 @@ public final class InteropClient implements AutoCloseable {
                         w.endpoint.domain(),
                         "instanceId",
                         w.endpoint.instance(),
-                        "ownerPid", ProcessHandle.current().pid(),
-                        "ownerStarted", ProcessHandle.current().info().startInstant().map(java.time.Instant::toString).orElse("unknown"),
+                        "ownerPid",
+                        ProcessHandle.current().pid(),
+                        "ownerStarted",
+                        ProcessHandle.current()
+                                .info()
+                                .startInstant()
+                                .map(java.time.Instant::toString)
+                                .orElse("unknown"),
                         "sessionId",
                         w.session,
                         "operationId",
@@ -819,10 +835,24 @@ public final class InteropClient implements AutoCloseable {
             for (Path path : files) {
                 var r = InteropFiles.readObject(path);
                 UUID id = uuid(r, "operationId"), domain = uuid(r, "domainId");
-                if(r.has("ownerPid")){
-                    long pid=integer(r,"ownerPid",1,Long.MAX_VALUE);
-                    if(pid!=ProcessHandle.current().pid() && ProcessHandle.of(pid).filter(ProcessHandle::isAlive)
-                            .filter(p->p.info().startInstant().map(at->at.toString().equals(r.get("ownerStarted").getAsString())).orElse(true)).isPresent()) continue;
+                if (r.has("ownerPid")) {
+                    long pid = integer(r, "ownerPid", 1, Long.MAX_VALUE);
+                    if (pid != ProcessHandle.current().pid()
+                            && ProcessHandle.of(pid)
+                                    .filter(ProcessHandle::isAlive)
+                                    .filter(
+                                            p ->
+                                                    p.info()
+                                                            .startInstant()
+                                                            .map(
+                                                                    at ->
+                                                                            at.toString()
+                                                                                    .equals(
+                                                                                            r.get(
+                                                                                                            "ownerStarted")
+                                                                                                    .getAsString()))
+                                                            .orElse(true))
+                                    .isPresent()) continue;
                 }
                 String product = string(r, "product");
                 var matches =
@@ -948,26 +978,31 @@ public final class InteropClient implements AutoCloseable {
                 || w.kind != null && !w.kind.equals(value.kind())
                 || w.target != null && !w.target.equals(value.target()))
             throw new IOException("wrong_operation");
-        if (w.kind==null){
-            Binding current=binding;
-            if(current==null || !current.endpoint().equals(w.endpoint) || value.step()==null &&
-                    !current.choice().target().equals(value.target())){
-                watches.remove(w.id,w);
+        if (w.kind == null) {
+            Binding current = binding;
+            if (current == null
+                    || !current.endpoint().equals(w.endpoint)
+                    || value.step() == null && !current.choice().target().equals(value.target())) {
+                watches.remove(w.id, w);
                 return;
             }
-            w.kind=value.kind();w.target=value.target();
-            if(!value.state().equals("finished"))persist(w);
+            w.kind = value.kind();
+            w.target = value.target();
+            if (!value.state().equals("finished")) persist(w);
         }
         if (value.rev() < w.rev) return;
-        if(w.previous!=null && (value.rev()==w.rev && !w.previous.equals(value)
-                || w.previous.result()!=null && !w.previous.result().equals(value.result())))throw new IOException("snapshot_conflict");
-        w.previous=value;
+        if (w.previous != null
+                && (value.rev() == w.rev && !w.previous.equals(value)
+                        || w.previous.result() != null
+                                && !w.previous.result().equals(value.result())))
+            throw new IOException("snapshot_conflict");
+        w.previous = value;
         boolean fresh = value.rev() > w.rev;
         w.rev = value.rev();
         w.lastSeen = System.nanoTime();
         w.detached = false;
         if (fresh) {
-            latest=new Observation(w.endpoint.display(),value);
+            latest = new Observation(w.endpoint.display(), value);
             listener.snapshot(value, world != null && world.session().equals(w.session));
         }
         if (value.state().equals("unresolved"))
@@ -1068,9 +1103,11 @@ public final class InteropClient implements AutoCloseable {
                         ack.outcome());
         if (ack.continuous() != null) body.addProperty("continuous", ack.continuous());
         if (ack.handoffId() != null) body.addProperty("handoffId", ack.handoffId().toString());
-        var confirmed=InteropSnapshot.parse(transport.call(w.endpoint.instance(),"step",body,2000));
-        if(!confirmed.operation().equals(w.id) || !confirmed.target().equals(w.target) || !confirmed.kind().equals(w.kind))
-            throw new IOException("wrong_operation");
+        var confirmed =
+                InteropSnapshot.parse(transport.call(w.endpoint.instance(), "step", body, 2000));
+        if (!confirmed.operation().equals(w.id)
+                || !confirmed.target().equals(w.target)
+                || !confirmed.kind().equals(w.kind)) throw new IOException("wrong_operation");
         run.completed = true;
         w.next = 0;
         listener.actionAcknowledged(w.id, run.action.kind());

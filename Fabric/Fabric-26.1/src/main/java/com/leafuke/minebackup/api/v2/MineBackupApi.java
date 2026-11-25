@@ -15,6 +15,21 @@ public interface MineBackupApi {
 
     int apiVersion();
 
+    /**
+     * Allows callers to recheck a previously issued handle after an uncertain local observation.
+     */
+    default java.util.concurrent.CompletionStage<LinkedOperationStatus> observeOperation(
+            java.util.UUID domainId, java.util.UUID operationId) {
+        return java.util.concurrent.CompletableFuture.completedFuture(
+                new LinkedOperationStatus(
+                        domainId,
+                        operationId,
+                        java.util.Optional.empty(),
+                        java.util.Optional.of(
+                                new OperationFailure(
+                                        OperationFailure.Code.UNSUPPORTED, "unsupported"))));
+    }
+
     OperationHandle<BackupResult> backupCurrent(BackupRequest request);
 
     default OperationHandle<ProtectedBackupResult> backupProtectedCurrent(BackupRequest request) {

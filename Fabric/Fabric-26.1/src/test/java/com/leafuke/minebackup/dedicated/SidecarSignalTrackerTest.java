@@ -52,14 +52,4 @@ class SidecarSignalTrackerTest {
         assertFalse(tracker.terminal().isPresent());
     }
 
-    @Test
-    void rejoinResultUsesExistingProtocolFields() throws Exception {
-        UUID request = UUID.randomUUID();
-        Map<String, String> fields = KnotLinkCodec.parse(
-                DedicatedRestoreSidecar.rejoinRequest(request, true, "").serialize());
-        assertEquals("REJOIN_RESULT", fields.get("cmd"));
-        assertEquals("success", fields.get("result"));
-        assertFalse(fields.containsKey("status"));
-        assertEquals(request.toString(), fields.get("request_id"));
-    }
 }

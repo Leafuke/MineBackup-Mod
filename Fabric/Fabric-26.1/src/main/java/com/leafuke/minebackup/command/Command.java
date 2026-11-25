@@ -16,12 +16,13 @@ import com.leafuke.minebackup.api.v2.RestoreResult;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
-import com.leafuke.minebackup.runtime.LocalSaveCoordinator;
 import com.leafuke.minebackup.runtime.AutomationUpdateResult;
+import com.leafuke.minebackup.runtime.LocalSaveCoordinator;
 import com.leafuke.minebackup.runtime.RestoreControlResult;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -34,8 +35,8 @@ import net.minecraft.world.level.storage.LevelResource;
 
 import java.nio.file.Files;
 import java.time.Duration;
-import java.time.format.DateTimeFormatter;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -51,6 +52,7 @@ public final class Command {
         dispatcher.register(Commands.literal("mb")
                 .requires(CommandPermissions::hasAnyAccess)
                 .executes(context -> sendHelp(context.getSource()))
+                .then(statusCommand())
                 .then(Commands.literal("help")
                         .executes(context -> sendHelp(context.getSource()))
                         .then(Commands.argument("command", StringArgumentType.greedyString())
@@ -96,6 +98,21 @@ public final class Command {
                 .then(buildTargetCommands())
                 .then(buildListCommands())
                 .then(buildAutoCommands()));
+    }
+
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> statusCommand() {
+        return Commands.literal("status")
+                .requires(source -> CommandPermissions.canUse(source, CommandCapability.BROWSE))
+                .executes(context -> linkStatus(context.getSource(), null))
+                .then(Commands.literal("select")
+                        .requires(source -> CommandPermissions.canUse(source, CommandCapability.TARGET_RESTORE))
+                        .then(Commands.argument("choice", StringArgumentType.greedyString())
+                                .suggests((context, builder) -> {
+                                    MineBackup.knotLink().client().status().choices()
+                                            .forEach(choice -> builder.suggest(choice.key()));
+                                    return builder.buildFuture();
+                                })
+                                .executes(context -> linkStatus(context.getSource(), StringArgumentType.getString(context, "choice")))));
     }
 
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> buildTargetCommands() {
@@ -246,6 +263,24 @@ public final class Command {
         if (rejectDedicatedRestore(source)) {
             return 0;
         }
+        if (file == null || file.isBlank()) {
+            MineBackup.knotLink()
+                    .latest(folder)
+                    .whenComplete(
+                            (ref, error) ->
+                                    source.getServer()
+                                            .executeIfPossible(
+                                                    () -> {
+                                                        if (error != null)
+                                                            source.sendFailure(
+                                                                    Component.translatable(
+                                                                            "minebackup.interop.stale_ref"));
+                                                        else
+                                                            executeRestoreTarget(
+                                                                    source, configId, folder, ref);
+                                                    }));
+            return 1;
+        }
         KnotLinkRequest request = KnotLinkRequest.command("RESTORE")
                 .conversation()
                 .field("config_id", configId)
@@ -255,24 +290,24 @@ public final class Command {
     }
 
     private static int executeListConfigs(CommandSourceStack source) {
-        return execute(source, KnotLinkRequest.command("LIST_CONFIGS"), response -> {
-            MutableComponent result = Component.translatable("minebackup.message.list_configs.title");
-            String data = response.data();
-            if (data == null || data.isBlank()) {
-                result.append(Component.translatable("minebackup.message.list.empty"));
-            } else {
-                for (String item : CommandSuggestions.splitList(data)) {
-                    String[] parts = item.split(",", 2);
-                    if (parts.length == 2) {
-                        result.append(Component.translatable(
-                                "minebackup.message.list_configs.entry",
-                                parts[0],
-                                parts[1]));
-                    }
-                }
-            }
-            source.sendSuccess(() -> result, false);
-        });
+        return execute(
+                source,
+                KnotLinkRequest.command("LIST_CONFIGS"),
+                response -> {
+                    MutableComponent result =
+                            Component.translatable("minebackup.message.list_configs.title");
+                    String data = response.data();
+                    var rows = CommandSuggestions.rows(data);
+                    if (rows.isEmpty())
+                        result.append(Component.translatable("minebackup.message.list.empty"));
+                    for (var row : rows)
+                        result.append(
+                                Component.translatable(
+                                        "minebackup.message.list_configs.entry",
+                                        row.get("configRef").getAsString(),
+                                        row.get("label").getAsString()));
+                    source.sendSuccess(() -> result, false);
+                });
     }
 
     private static int executeListFolders(CommandSourceStack source, String configId) {
@@ -519,16 +554,21 @@ public final class Command {
     private static void observeBackup(
             CommandSourceStack source,
             OperationHandle<BackupResult> handle) {
-        handle.completion().thenAccept(result -> source.getServer().executeIfPossible(() -> {
-            if (result.outcome() == BackupResult.Outcome.NO_CHANGES) {
-                source.sendSuccess(
-                        () -> Component.translatable("minebackup.message.backup.no_changes"),
-                        false);
-            } else if (result.outcome() == BackupResult.Outcome.REJECTED
-                    || result.outcome() == BackupResult.Outcome.FAILED) {
-                sendOperationFailure(source, result.failure());
-            }
-        }));
+        handle.completion()
+                .thenAccept(
+                        result ->
+                                source.getServer()
+                                        .executeIfPossible(
+                                                () -> {
+                                                    if (result.outcome()
+                                                                    == BackupResult.Outcome.REJECTED
+                                                            || result.outcome()
+                                                                    == BackupResult.Outcome
+                                                                            .FAILED) {
+                                                        sendOperationFailure(
+                                                                source, result.failure());
+                                                    }
+                                                }));
     }
 
     private static void observeRestore(
@@ -569,31 +609,85 @@ public final class Command {
         source.sendSuccess(
                 () -> Component.translatable("minebackup.message.command.sent", request.commandName()),
                 false);
-        MineBackup.knotLink().query(request).whenComplete((response, error) ->
-                source.getServer().executeIfPossible(() -> {
-                    if (error != null) {
-                        MineBackup.LOGGER.warn("KnotLink command {} failed", request.commandName(), error);
-                        source.sendFailure(FailureMessages.message(error));
-                        return;
-                    }
-                    if (!response.isOk()) {
-                        MineBackup.LOGGER.warn("Backend rejected {}: {}", request.commandName(), response.displayMessage());
-                        source.sendFailure(Component.translatable(
-                                "minebackup.message.command.fail",
-                                FailureMessages.message(OperationFailure.Code.BACKEND_REJECTED)));
-                        return;
-                    }
-                    onSuccess.accept(response);
-                }));
+        MineBackup.knotLink()
+                .query(request)
+                .whenComplete(
+                        (response, error) ->
+                                source.getServer()
+                                        .executeIfPossible(
+                                                () -> {
+                                                    if (error != null) {
+                                                        MineBackup.LOGGER.warn(
+                                                                "KnotLink command {} failed",
+                                                                request.commandName(),
+                                                                error);
+                                                        source.sendFailure(
+                                                                FailureMessages.message(error));
+                                                        return;
+                                                    }
+                                                    if (!response.isOk()) {
+                                                        MineBackup.LOGGER.warn(
+                                                                "Backend rejected {}: {}",
+                                                                request.commandName(),
+                                                                response.displayMessage());
+                                                        source.sendFailure(
+                                                                Component.translatable(
+                                                                        "minebackup.message.command.fail",
+                                                                        FailureMessages.detail(
+                                                                                new OperationFailure(
+                                                                                        OperationFailure
+                                                                                                .Code
+                                                                                                .BACKEND_REJECTED,
+                                                                                        response
+                                                                                                .displayMessage()))));
+                                                        return;
+                                                    }
+                                                    onSuccess.accept(response);
+                                                }));
         return 1;
     }
 
-    private static void sendSuccessMessage(CommandSourceStack source, KnotLinkResponse response) {
-        source.sendSuccess(
-                () -> Component.translatable(
-                        "minebackup.message.command.response",
-                        Component.literal(response.displayMessage())),
-                false);
+    private static void sendSuccessMessage(CommandSourceStack source,KnotLinkResponse response) {
+        if("result_unknown".equals(response.displayMessage()))
+            source.sendSuccess(()->Component.translatable("minebackup.interop.result_unknown",""),false);
+    }
+
+    private static int linkStatus(CommandSourceStack source, String choice) {
+        var link = MineBackup.knotLink().client();
+        var read = choice == null ? link.refresh() : link.select(choice);
+        read.whenComplete(
+                (status, error) ->
+                        source.getServer()
+                                .executeIfPossible(
+                                        () -> {
+                                            if (error != null)
+                                                source.sendFailure(
+                                                        Component.translatable(
+                                                                "minebackup.interop.unverified"));
+                                            else {
+                                                source.sendSuccess(
+                                                        () ->
+                                                                Component.translatable(
+                                                                        "minebackup.interop."
+                                                                                + status.code(),
+                                                                        status.detail()),
+                                                        false);
+                                                if(link.latest()!=null)source.sendSuccess(()->FailureMessages.observation(link.latest()),false);
+                                            if (status.choices().size() > 1)
+                                                    for (var c : status.choices())
+                                                        source.sendSuccess(
+                                                                () ->
+                                                                        Component.literal(
+                                                                                c.endpoint()
+                                                                                                .display()
+                                                                                        + " · "
+                                                                                        + c.label()
+                                                                                        + "   /mb status select "
+                                                                                        + c.key()),
+                                                                false);
+                                            }
+                                        }));
+        return 1;
     }
 
     private static int sendHelp(CommandSourceStack source) {

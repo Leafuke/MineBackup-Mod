@@ -1,25 +1,25 @@
 package com.leafuke.minebackup.runtime;
 
+import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
+import com.leafuke.minebackup.api.v2.BackupCatalogResult;
 import com.leafuke.minebackup.api.v2.BackupId;
 import com.leafuke.minebackup.api.v2.BackupProtectionRequest;
 import com.leafuke.minebackup.api.v2.BackupProtectionResult;
-import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
-import com.leafuke.minebackup.api.v2.BackupCatalogResult;
 import com.leafuke.minebackup.api.v2.BackupRequest;
 import com.leafuke.minebackup.api.v2.BackupResult;
 import com.leafuke.minebackup.api.v2.OperationFailure;
 import com.leafuke.minebackup.api.v2.OperationHandle;
 import com.leafuke.minebackup.api.v2.OperationPhase;
+import com.leafuke.minebackup.api.v2.OperationPresentation;
 import com.leafuke.minebackup.api.v2.OperationSnapshot;
 import com.leafuke.minebackup.api.v2.OperationType;
-import com.leafuke.minebackup.api.v2.OperationPresentation;
+import com.leafuke.minebackup.api.v2.RestoreCancelRequest;
+import com.leafuke.minebackup.api.v2.RestoreCancelResult;
 import com.leafuke.minebackup.api.v2.RestoreExecutionPolicy;
 import com.leafuke.minebackup.api.v2.RestoreRequest;
 import com.leafuke.minebackup.api.v2.RestoreResult;
-import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.KnotLinkCommunicationException;
-import com.leafuke.minebackup.api.v2.RestoreCancelRequest;
-import com.leafuke.minebackup.api.v2.RestoreCancelResult;
+import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 
 import java.time.Duration;
@@ -27,10 +27,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.CompletionStage;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
@@ -79,6 +79,107 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
     interface Cleanup {
         void finish(WorldOperationSession.Token token, OperationPresentation presentation,
                     OperationFailure failure, Runnable complete);
+    }
+
+    private InteropRequests interop;
+
+    synchronized void useInterop(InteropRequests gateway) {
+        interop = gateway;
+        capabilitySource(gateway::capabilities);
+    }
+
+    synchronized void observe(com.leafuke.minebackup.interop.InteropSnapshot value) {
+        if (active == null || !active.id().equals(value.operation()) || ending.contains(active))
+            return;
+        if (value.state().equals("unresolved")) {
+            unconfirmed(value.operation());
+            return;
+        }
+        if (value.result() == null) return;
+        String outcome = value.result().get("outcome").getAsString();
+        OperationFailure failure =
+                outcome.equals("succeeded")
+                        ? null
+                        : new OperationFailure(
+                                outcome.equals("cancelled")
+                                        ? OperationFailure.Code.BACKEND_CANCELLED
+                                        : value.kind().equals("restore")
+                                                ? OperationFailure.Code.RESTORE_FAILED
+                                                : OperationFailure.Code.BACKEND_REJECTED,
+                                value.result().has("code")
+                                        ? value.result().get("code").getAsString()
+                                        : outcome);
+        if (active instanceof BackupOperationHandle backup) {
+            if (failure != null) {
+                finishBackup(
+                        backup,
+                        outcome.equals("cancelled")
+                                ? BackupResult.Outcome.CANCELLED
+                                : BackupResult.Outcome.FAILED,
+                        null,
+                        failure);
+                return;
+            }
+            String effect = value.result().get("effect").getAsString();
+            String ref =
+                    value.result().has("backupRef")
+                            ? value.result().get("backupRef").getAsString()
+                            : null;
+            if (backup.protectedBackup) {
+                backup.protectionConfirmed =
+                        value.result().has("important")
+                                && value.result().get("important").getAsBoolean()
+                                && ref != null
+                                && (effect.equals("created") || effect.equals("reused"));
+                if (!backup.protectionConfirmed) {
+                    failBackup(
+                            backup,
+                            OperationFailure.Code.PROTOCOL_ERROR,
+                            "invalid_protection_receipt");
+                    return;
+                }
+                backup.reused = effect.equals("reused");
+            }
+            finishBackup(
+                    backup,
+                    effect.equals("unchanged")
+                            ? BackupResult.Outcome.NO_CHANGES
+                            : BackupResult.Outcome.CREATED,
+                    ref,
+                    null);
+        } else if (active instanceof RestoreOperationHandle restore) {
+            if (value.recoveryPending()) {
+                unconfirmed(value.operation());
+                return;
+            }
+            // The local handle includes rejoin when a controlled exit is in progress.
+            if ("waiting".equals(value.followUp())
+                    || "eligible".equals(value.reopen()) && value.followUp() == null) return;
+            if (failure != null)
+                finishRestore(
+                        restore,
+                        outcome.equals("cancelled")
+                                ? RestoreResult.Outcome.CANCELLED
+                                : RestoreResult.Outcome.FAILED,
+                        failure);
+            else if (java.util.Set.of("openFailed", "abandoned", "unconfirmed")
+                    .contains(java.util.Objects.toString(value.followUp(), "")))
+                finishRestore(
+                        restore,
+                        RestoreResult.Outcome.RESTORED_REJOIN_FAILED,
+                        new OperationFailure(OperationFailure.Code.REJOIN_FAILED, "rejoin_failed"));
+            else finishRestore(restore, RestoreResult.Outcome.RESTORED, null);
+        }
+    }
+
+    synchronized void unconfirmed(UUID id) {
+        if (active == null || !active.id().equals(id)) return;
+        if (active instanceof BackupOperationHandle backup)
+            failBackup(
+                    backup, OperationFailure.Code.CROSS_PROCESS_STATE_UNCERTAIN, "result_unknown");
+        if (active instanceof RestoreOperationHandle restore)
+            failRestore(
+                    restore, OperationFailure.Code.CROSS_PROCESS_STATE_UNCERTAIN, "result_unknown");
     }
 
     synchronized void bindLifecycle(BooleanSupplier connected, Cleanup cleanup) {
@@ -185,7 +286,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
     }
 
     synchronized void checkSessionTimeout() {
-        if (session != null && !ending.contains(active) && session.expired()) {
+        if (interop == null && session != null && !ending.contains(active) && session.expired()) {
             var timeout = session.timeout();
             if (timeout.code() == OperationFailure.Code.REJOIN_FAILED && active instanceof RestoreOperationHandle restore) {
                 finishRestore(restore, RestoreResult.Outcome.RESTORED_REJOIN_FAILED,
@@ -343,6 +444,41 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
                     () -> cancel(handle));
             active = handle;
 
+            if (interop != null && request.backupId().isEmpty()) {
+                handle.resolvingLatest = true;
+                interop.latest(null)
+                        .whenComplete(
+                                (ref, error) -> {
+                                    synchronized (this) {
+                                        if (active != handle || handle.phase().isTerminal()) return;
+                                        if (error != null) {
+                                            failRestore(
+                                                    handle,
+                                                    OperationFailure.Code.BACKEND_REJECTED,
+                                                    "stale_ref");
+                                            return;
+                                        }
+                                        handle.pinnedRef = ref;
+                                        handle.resolvingLatest = false;
+                                        if (seconds == 0) {
+                                            submitRestore(handle);
+                                            return;
+                                        }
+                                        restoreDeadlineNanos =
+                                                nanoTime.getAsLong()
+                                                        + Duration.ofSeconds(seconds).toNanos();
+                                        lastAnnouncedSecond = seconds;
+                                        countdownFuture =
+                                                scheduler.scheduleAtFixedRate(
+                                                        () -> tickCountdown(handle),
+                                                        1,
+                                                        1,
+                                                        TimeUnit.SECONDS);
+                                        countdownListener.onStarted(handle, seconds);
+                                    }
+                                });
+                return handle;
+            }
             if (seconds > 0) {
                 restoreDeadlineNanos = nanoTime.getAsLong() + Duration.ofSeconds(seconds).toNanos();
                 lastAnnouncedSecond = seconds;
@@ -395,6 +531,45 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
 
     CompletionStage<BackupCatalogResult> listCurrentBackups(BackupCatalogRequest request) {
         Objects.requireNonNull(request, "request");
+        if (interop != null) {
+            var binding = interop.client().binding();
+            if (binding == null)
+                return java.util.concurrent.CompletableFuture.completedFuture(
+                        BackupCatalogResult.failed(
+                                BackupCatalogResult.Outcome.FAILED,
+                                new OperationFailure(
+                                        OperationFailure.Code.NO_ACTIVE_SERVER, "stale_binding")));
+            return interop.client()
+                    .catalog(
+                            "backups",
+                            com.leafuke.minebackup.interop.InteropWire.object(
+                                    "targetRef", binding.choice().target()))
+                    .handle(
+                            (rows, error) -> {
+                                if (error != null)
+                                    return BackupCatalogResult.failed(
+                                            BackupCatalogResult.Outcome.FAILED,
+                                            KnotLinkCommunicationException.failure(error));
+                                var entries =
+                                        new java.util.ArrayList<
+                                                com.leafuke.minebackup.api.v2.BackupEntry>();
+                                for (var item : rows) {
+                                    var row = item.getAsJsonObject();
+                                    entries.add(
+                                            new com.leafuke.minebackup.api.v2.BackupEntry(
+                                                    BackupId.of(row.get("backupRef").getAsString()),
+                                                    row.has("createdAt")
+                                                            ? Optional.of(
+                                                                    java.time.Instant.parse(
+                                                                            row.get("createdAt")
+                                                                                    .getAsString()))
+                                                            : Optional.empty(),
+                                                    java.util.OptionalLong.empty(),
+                                                    Optional.of(row.get("label").getAsString())));
+                                }
+                                return BackupCatalogResult.success(entries);
+                            });
+        }
         CatalogOperationHandle handle;
         synchronized (this) {
             if (closed || !serverAvailable.getAsBoolean()) {
@@ -640,7 +815,10 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
 
     private void submitRestore(RestoreOperationHandle handle) {
         synchronized (this) {
-            if (active != handle || handle.phase().isTerminal() || !handle.claimSubmission()) {
+            if (active != handle
+                    || handle.phase().isTerminal()
+                    || handle.resolvingLatest
+                    || !handle.claimSubmission()) {
                 return;
             }
             if (handle.phase() == OperationPhase.COUNTING_DOWN) {
@@ -657,6 +835,7 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
         countdownListener.onSubmitted(handle);
 
         KnotLinkRequest command = restoreCommand(handle.id(), handle.request());
+        if (handle.pinnedRef != null) command.field("file", handle.pinnedRef);
         safeQuery(command).whenComplete((response, error) -> {
             if (error != null) {
                 OperationFailure failure = KnotLinkCommunicationException.failure(error);
@@ -959,8 +1138,10 @@ final class CurrentWorldOperationCoordinator implements AutoCloseable {
 
     private void failForShutdown(AbstractOperationHandle<?> current, String message) {
         if (current instanceof BackupOperationHandle backup) {
+            if(interop!=null){unconfirmed(backup.id());return;}
             failBackup(backup, OperationFailure.Code.SERVER_STOPPED, message);
         } else if (current instanceof RestoreOperationHandle restore) {
+            if(interop!=null && restore.phase()!=OperationPhase.COUNTING_DOWN){unconfirmed(restore.id());return;}
             failRestore(restore, OperationFailure.Code.SERVER_STOPPED, message);
         } else if (current instanceof BackupProtectionHandle protection) {
             failProtection(protection, OperationFailure.Code.SERVER_STOPPED, message);

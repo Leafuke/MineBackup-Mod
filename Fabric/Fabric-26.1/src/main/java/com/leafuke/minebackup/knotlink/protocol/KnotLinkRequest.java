@@ -1,7 +1,7 @@
 package com.leafuke.minebackup.knotlink.protocol;
 
-import java.util.LinkedHashMap;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -72,6 +72,20 @@ public final class KnotLinkRequest {
         if (key == null || key.isBlank() || "cmd".equalsIgnoreCase(key)) {
             throw new IllegalArgumentException("Invalid KnotLink request field: " + key);
         }
+    }
+
+    /** Typed input to the current-world API adapter; never decode a serialized list. */
+    public Map<String, Object> parameters() {
+        Map<String, Object> values = new LinkedHashMap<>();
+        fields.forEach(
+                (key, field) ->
+                        values.put(
+                                key,
+                                switch (field) {
+                                    case KnotLinkCodec.ScalarValue scalar -> scalar.value();
+                                    case KnotLinkCodec.ListValue list -> list.values();
+                                }));
+        return Map.copyOf(values);
     }
 
     public String commandName() {

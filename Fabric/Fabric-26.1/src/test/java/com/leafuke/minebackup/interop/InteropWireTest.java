@@ -89,12 +89,28 @@ class InteropWireTest {
         assertThrows(
                 java.io.IOException.class,
                 () -> WorldAdmission.enter(guards, world, pending.id(), UUID.randomUUID()));
-        try (var own = WorldAdmission.enter(guards, world, pending.id(), pending.id())) {
-            assertNull(own.id());
-        }
+        assertThrows(java.io.IOException.class,()->WorldAdmission.enter(guards,world,pending.id(),pending.id()));
         pending.close();
         try (var second = WorldAdmission.enter(guards, world, null, null)) {
             assertNotNull(second.id());
         }
+    }
+    @Test void backendGrantOnlyCoversExactPhysicalWorldAndOriginalRecordIsNotBlindlyDeleted() throws Exception {
+        Path guards=Files.createDirectories(temp.resolve("guard"));
+        Path world=Files.createDirectories(temp.resolve("saves/world"));
+        UUID operation=UUID.randomUUID(),domain=UUID.randomUUID();
+        var roots=new com.google.gson.JsonArray();roots.add(world.getParent().toString());
+        var record=object("format",1,"operationId",operation,"domainId",domain,"product","folderrewind","roots",roots);
+        Path path=guards.resolve(operation+".json");InteropFiles.writeObject(path,record);
+        assertThrows(java.io.IOException.class,()->WorldAdmission.enter(guards,world,operation,domain));
+        roots.set(0,new com.google.gson.JsonPrimitive(world.toString()));InteropFiles.writeObject(path,record);
+        try(var r=WorldAdmission.enter(guards,world,operation,domain)){assertNull(r.id());}
+        assertTrue(Files.exists(path));Files.delete(path);
+        var local=WorldAdmission.enter(guards,world,null,null);
+        Path own=guards.resolve(local.id()+".json");
+        var replaced=InteropFiles.readObject(own);replaced.addProperty("domainId",domain.toString());
+        InteropFiles.writeObject(own,replaced);
+        assertThrows(java.io.IOException.class,local::close);
+        assertEquals(replaced,InteropFiles.readObject(own));
     }
 }

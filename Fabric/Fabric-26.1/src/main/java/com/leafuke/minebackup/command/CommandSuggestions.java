@@ -3,7 +3,6 @@ package com.leafuke.minebackup.command;
 import com.leafuke.minebackup.MineBackup;
 import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
 import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
-import com.leafuke.minebackup.knotlink.protocol.KnotLinkResponse;
 import com.mojang.brigadier.LiteralMessage;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
@@ -105,6 +104,15 @@ public final class CommandSuggestions {
     }
 
     static List<String> splitList(String data) {
+        if (data != null && data.stripLeading().startsWith("[")) {
+            return rows(data).stream()
+                    .map(
+                            row ->
+                                    row.has("targetRef")
+                                            ? row.get("targetRef").getAsString()
+                                            : row.get("backupRef").getAsString())
+                    .toList();
+        }
         if (data == null || data.isBlank()) {
             return List.of();
         }
@@ -152,7 +160,23 @@ public final class CommandSuggestions {
         });
     }
 
+    static List<com.google.gson.JsonObject> rows(String data) {
+        var result = new ArrayList<com.google.gson.JsonObject>();
+        for (var row : com.google.gson.JsonParser.parseString(data).getAsJsonArray())
+            result.add(row.getAsJsonObject());
+        return List.copyOf(result);
+    }
+
     private static List<ConfigDescriptor> parseConfigs(String data) {
+        if (data != null && data.stripLeading().startsWith("[{"))
+            return rows(data).stream()
+                    .map(
+                            row ->
+                                    new ConfigDescriptor(
+                                            row.get("configRef").getAsString(),
+                                            row.get("label").getAsString()))
+                    .toList();
+        if ("[]".equals(data)) return List.of();
         List<ConfigDescriptor> configs = new ArrayList<>();
         for (String item : splitList(data)) {
             String[] parts = item.split(",", 2);

@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "com.leafuke.minebackup.client.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": ["LinkStatusEntryMixin", "WorldOpenFlowsMixin"],
+  "injectors": {"defaultRequire": 1}
+}

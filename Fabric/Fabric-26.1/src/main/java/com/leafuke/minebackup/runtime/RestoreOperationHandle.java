@@ -12,6 +12,8 @@ final class RestoreOperationHandle
         extends AbstractOperationHandle<RestoreResult>
         implements InternalRestoreHandle {
     private final RestoreRequest request;
+    boolean resolvingLatest;
+    String pinnedRef;
     private boolean submissionStarted;
 
     boolean claimSubmission() {

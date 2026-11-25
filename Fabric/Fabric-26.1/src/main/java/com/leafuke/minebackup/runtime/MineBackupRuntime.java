@@ -1,9 +1,6 @@
 package com.leafuke.minebackup.runtime;
 
 import com.leafuke.minebackup.MineBackup;
-import com.leafuke.minebackup.command.FailureMessages;
-import com.leafuke.minebackup.knotlink.KnotLinkCommunicationException;
-import com.leafuke.minebackup.ModInfo;
 import com.leafuke.minebackup.api.v2.AutoBackupState;
 import com.leafuke.minebackup.api.v2.BackupCatalogRequest;
 import com.leafuke.minebackup.api.v2.BackupCatalogResult;
@@ -11,8 +8,8 @@ import com.leafuke.minebackup.api.v2.BackupRequest;
 import com.leafuke.minebackup.api.v2.BackupResult;
 import com.leafuke.minebackup.api.v2.CurrentWorldAutomationMode;
 import com.leafuke.minebackup.api.v2.CurrentWorldAutomationState;
-import com.leafuke.minebackup.api.v2.MineBackupApi;
 import com.leafuke.minebackup.api.v2.MessageSlot;
+import com.leafuke.minebackup.api.v2.MineBackupApi;
 import com.leafuke.minebackup.api.v2.OperationFailure;
 import com.leafuke.minebackup.api.v2.OperationHandle;
 import com.leafuke.minebackup.api.v2.RestoreRequest;
@@ -25,11 +22,12 @@ import com.leafuke.minebackup.command.CommandCapability;
 import com.leafuke.minebackup.command.CommandPermissions;
 import com.leafuke.minebackup.config.Config;
 import com.leafuke.minebackup.dedicated.DedicatedRestoreManager;
-import com.leafuke.minebackup.knotlink.KnotLinkClient;
-import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
+import com.leafuke.minebackup.interop.*;
+import com.leafuke.minebackup.interop.InteropSnapshot.Ack;
+import com.leafuke.minebackup.knotlink.KnotLinkCommunicationException;
 import com.leafuke.minebackup.restore.RestoreSession;
-import com.leafuke.minebackup.update.VersionNumber;
 import com.mojang.authlib.GameProfile;
+
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -44,23 +42,79 @@ import net.minecraft.world.level.storage.LevelResource;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.UUID;
+import java.util.function.BooleanSupplier;
 
 public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
-    private static final String MINIMUM_MAIN_VERSION = "1.16.0";
-    private static final int READY_STREAK_REQUIRED = 3;
 
-    private final KnotLinkClient knotLink = new KnotLinkClient();
+    private final InteropClient link =
+            new InteropClient(
+                    Config.restartDirectory().resolveSibling("interop-v3"),
+                    new InteropClient.Listener() {
+                        public void snapshot(InteropSnapshot value, boolean visible) {
+                            onSnapshot(value, visible);
+                        }
+
+                        public void actionAcknowledged(UUID operation, String kind) {
+                            if (!kind.equals("open")) return;
+                            Exit previous = exit;
+                            if (previous != null && previous.operation.equals(operation)) {
+                                exit = null;
+                                MinecraftServer joined = server;
+                                if (joined != null)
+                                    joined.executeIfPossible(
+                                            () ->
+                                                    link.enter(
+                                                            joined.getWorldPath(LevelResource.ROOT),
+                                                            joined.isDedicatedServer()));
+                                else link.leave(false);
+                            }
+                        }
+
+                        public void unconfirmed(UUID id, boolean restore) {
+                            operations.unconfirmed(id);
+                            knotLink.unconfirmed(id);
+                        }
+
+                        public CompletionStage<Ack> perform(
+                                InteropClient.Binding b,
+                                InteropSnapshot s,
+                                long expiry,
+                                BooleanSupplier current) {
+                            return gameStep(b, s, expiry, current);
+                        }
+                    });
+    private final InteropRequests knotLink = new InteropRequests(link);
+    private volatile UUID frozenStep;
+    private volatile long freezeUntil;
+    private volatile Exit exit;
+
+    private static final class Exit {
+        final MinecraftServer original;
+        final UUID operation;
+        final Path root;
+        final RestoreSession.RejoinInfo info;
+        volatile boolean stopped, opening;
+        volatile long startBefore;
+
+        Exit(MinecraftServer server, UUID id, Path root, RestoreSession.RejoinInfo info) {
+            original = server;
+            operation = id;
+            this.root = root;
+            this.info = info;
+        }
+    }
+
+    private final java.util.LinkedHashMap<UUID, Boolean> announced =
+            new java.util.LinkedHashMap<>();
     private final ScheduledExecutorService coordinator = Executors.newSingleThreadScheduledExecutor(
             daemonThreadFactory());
     private final CurrentWorldOperationCoordinator operations = new CurrentWorldOperationCoordinator(
@@ -71,14 +125,18 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
             () -> Config.get().restore().countdownSeconds(),
             countdownListener());
     private final AutoSaveController autoSave = new AutoSaveController();
-    private final java.util.concurrent.ConcurrentMap<UUID, Runnable> pendingCleanup = new java.util.concurrent.ConcurrentHashMap<>();
+
     private final java.util.concurrent.ExecutorService sidecarWorker = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "minebackup-sidecar-start");
         thread.setDaemon(true);
         return thread;
     });
-    { operations.bindLifecycle(() -> knotLink.signalChannelState()
-            == com.leafuke.minebackup.api.v2.BackendStatusResult.ChannelState.CONNECTED, this::finishWorldOperation); }
+
+    {
+        operations.bindLifecycle(link::signalConnected, (token, p, f, done) -> done.run());
+        operations.useInterop(knotLink);
+    }
+
     private final AutoBackupScheduler automaticBackups =
             new AutoBackupScheduler(operations, coordinator, this::broadcastAutomationReminder);
     private final DedicatedRestoreManager dedicatedRestore =
@@ -88,18 +146,28 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     private final FeedbackRouter feedback = new FeedbackRouter(() -> server);
     private volatile boolean operationsAvailable;
     private volatile boolean dedicatedServer;
-    private volatile String lastHandshakeNoticeVersion;
-    private volatile ReleasePoller releasePoller;
+
+
 
     public void registerEvents() {
         ServerLifecycleEvents.SERVER_STARTING.register(this::onServerStarting);
+        ServerLifecycleEvents.SERVER_STARTED.register(
+                current -> {
+                    if (current.isDedicatedServer())
+                        link.enter(current.getWorldPath(LevelResource.ROOT), true);
+                });
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
         ServerLifecycleEvents.SERVER_STOPPED.register(this::onServerStopped);
-        ServerTickEvents.END_SERVER_TICK.register(ignored -> operations.checkSessionTimeout());
+        ServerTickEvents.END_SERVER_TICK.register(
+                current -> {
+                    if (frozenStep != null
+                            && (System.nanoTime() >= freezeUntil || !autoSave.continuous(current)))
+                        clearFreeze();
+                });
         ServerPlayConnectionEvents.JOIN.register(this::onPlayerJoin);
     }
 
-    public KnotLinkClient knotLink() {
+    public InteropRequests knotLink() {
         return knotLink;
     }
 
@@ -136,11 +204,18 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         server = startingServer;
         operationsAvailable = true;
         dedicatedServer = startingServer.isDedicatedServer();
-        lastHandshakeNoticeVersion = null;
+
         Config.load();
-        operations.worldStarted(startingServer.getWorldPath(LevelResource.ROOT));
+        Path root = startingServer.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
+        Exit pending = exit;
+        boolean expected = pending != null && pending.opening && pending.root.equals(root);
+        if (!expected) {
+            exit = null;
+            operations.worldStarted(root);
+            if (!dedicatedServer) link.enter(root, false);
+        }
         sidecarWorker.execute(dedicatedRestore::loadLastResult);
-        knotLink.startSubscriber(this::handleSignal);
+
         AutoBackupScheduler.StartupResult autoStartup = automaticBackups.serverStarted(startingServer);
 
         switch (autoStartup.migration()) {
@@ -196,435 +271,309 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     private void onServerStopping(MinecraftServer stoppingServer) {
         operationsAvailable = false;
         automaticBackups.serverStopped();
-        operations.serverStopping(operations.preserveRestoreOnStop());
-        pendingCleanup.values().forEach(Runnable::run);
-        if (autoSave.unfreeze()) {
-            MineBackup.LOGGER.warn("Server stopped while auto-save was frozen; save state was restored.");
-        }
+        operations.serverStopping(exit != null && exit.original == stoppingServer);
+        link.leave(exit != null && exit.original == stoppingServer);
+        clearFreeze();
+
         if (dedicatedServer) {
             close();
         }
     }
 
     private void onServerStopped(MinecraftServer stoppedServer) {
-        ReleasePoller currentPoller = releasePoller;
-        if (currentPoller != null && currentPoller.restoreServer == stoppedServer) {
-            currentPoller.markServerStopped(
-                    stoppedServer.getPlayerList().getPlayers().isEmpty());
-        }
+        Exit pending = exit;
+        if (pending != null && pending.original == stoppedServer)
+            pending.stopped = stoppedServer.getPlayerList().getPlayers().isEmpty();
         if (server == stoppedServer) {
             server = null;
             operationsAvailable = false;
         }
     }
 
-    private void handleSignal(Map<String, String> fields) {
-        MinecraftServer current = server;
-        long generation = operations.worldGeneration();
-        if (current != null && operationsAvailable && !current.isSameThread()) {
-            current.executeIfPossible(() -> {
-                if (server == current && operations.worldGeneration() == generation) dispatchSignal(fields);
-            });
-        } else dispatchSignal(fields);
+    private void clearFreeze() {
+        UUID step = frozenStep;
+        if (step != null) autoSave.unfreeze(step);
+        frozenStep = null;
     }
 
-    private void dispatchSignal(Map<String, String> fields) {
-        String event = fields.get("event");
-        if (event == null) return;
-        switch (event) {
-            case "handshake" -> handleHandshake(fields);
-            case "pre_hot_backup" -> handlePreHotBackup(fields);
-            case "pre_hot_restore" -> handlePreHotRestore(fields);
-            case "restore_finished" -> operations.restoreFinished(fields);
-            case "rejoin_world" -> handleRejoinWorld(fields);
-            default -> {
-                var presentation = operations.activePresentation();
-                long generation = operations.worldGeneration();
-                boolean accepted = operations.handleSignal(fields) || operations.acceptsInformation(fields);
-                MinecraftServer current = server;
-                if (accepted && current != null) current.executeIfPossible(() -> {
-                    if (server == current && operations.worldGeneration() == generation)
-                        broadcastInformationalEventOnServer(current, fields, event, presentation);
-                });
-            }
+    private synchronized void onSnapshot(InteropSnapshot s, boolean visible) {
+        var presentation =
+                operations
+                        .activeSnapshot()
+                        .filter(h -> h.requestId().equals(s.operation()))
+                        .map(h -> operations.activePresentation())
+                        .orElse(com.leafuke.minebackup.api.v2.OperationPresentation.defaults());
+        knotLink.observed(s);
+        operations.observe(s);
+        if (!visible || !Set.of("backup", "restore", "backupAll").contains(s.kind())) return;
+        Boolean terminalSeen = announced.get(s.operation());
+        if (Boolean.TRUE.equals(terminalSeen)) return;
+        if (announced.size() >= 2048 && terminalSeen == null) announced.pollFirstEntry();
+        if (s.state().equals("queued") || s.state().equals("running")) {
+            if (announced.put(s.operation(), false) == null)
+                feedback.optional(
+                        presentation,
+                        s.kind().equals("restore")
+                                ? MessageSlot.RESTORE_PREPARING
+                                : MessageSlot.BACKUP_STARTED,
+                        Component.translatable("minebackup.interop.queued"));
+        } else if (s.result() != null) {
+            announced.put(s.operation(), true);
+            boolean ok = s.result().get("outcome").getAsString().equals("succeeded");
+            if (ok)
+                feedback.optional(
+                        presentation,
+                        s.kind().equals("restore")
+                                ? MessageSlot.RESTORE_SUCCEEDED
+                                : MessageSlot.BACKUP_SUCCEEDED,
+                        Component.translatable(
+                                s.kind().equals("restore")
+                                        ? "minebackup.interop.restored"
+                                        : s.warnings()
+                                                ? "minebackup.interop.backup_warning"
+                                                : s.result().has("effect")
+                                                                && s.result()
+                                                                        .get("effect")
+                                                                        .getAsString()
+                                                                        .equals("unchanged")
+                                                        ? "minebackup.message.backup.no_changes"
+                                                        : "minebackup.interop.backed_up"));
         }
+        MineBackup.LOGGER.debug(
+                "Interop operation {} revision {} state {}", s.operation(), s.rev(), s.state());
     }
 
-    private void finishWorldOperation(WorldOperationSession.Token token,
-            com.leafuke.minebackup.api.v2.OperationPresentation presentation,
-            OperationFailure failure, Runnable complete) {
-        if (token == null) { complete.run(); return; }
-        boolean restore = operations.activeSnapshot().map(value -> value.type()
-                == com.leafuke.minebackup.api.v2.OperationType.RESTORE).orElse(false);
-        Runnable finish = () -> {
-            if (pendingCleanup.remove(token.operationId()) == null) return;
-            try {
-                boolean resumed = autoSave.unfreeze(token);
-                ReleasePoller poller = releasePoller;
-                if (poller != null && poller.token.operationId().equals(token.operationId())) poller.cancel();
-                if (failure != null) {
-                    cancelSidecar(token.operationId());
-                    MineBackup.LOGGER.warn("World operation {} ended: {}: {}", token.operationId(), failure.code(), failure.message());
-                    if (resumed && failure.message().contains("backend outcome is unconfirmed"))
-                        feedback.optional(presentation, MessageSlot.BACKUP_FAILED,
-                                Component.translatable("minebackup.broadcast.backup.unconfirmed"));
-                    if (restore) ClientHooks.restoreFailed(
-                            feedback.resolve(presentation, MessageSlot.RESTORE_FAILED,
-                                    Component.translatable("minebackup.message.restore.failed"), "", "", FailureMessages.message(failure.code())),
-                            () -> operations.worldGeneration() == token.serverGeneration()
-                                    && (operations.sessionToken() == null
-                                        || operations.sessionToken().operationId().equals(token.operationId())));
-                }
-            } finally {
-                complete.run();
+    private CompletionStage<Ack> gameStep(
+            InteropClient.Binding b, InteropSnapshot snap, long deadline, BooleanSupplier live) {
+        var answer = new CompletableFuture<Ack>();
+        var step = snap.step();
+        if (step.kind().equals("open")) {
+            Exit pending = exit;
+            if (pending == null
+                    || !pending.operation.equals(snap.operation())
+                    || !pending.stopped
+                    || server != null) {
+                answer.complete(Ack.of("abandoned"));
+                return answer;
             }
-        };
-        pendingCleanup.put(token.operationId(), finish);
-        MinecraftServer current = server;
-        if (current == null || current.isSameThread() || !operationsAvailable) finish.run();
-        else current.executeIfPossible(finish);
-    }
-
-    private void cancelSidecar(UUID operationId) {
-        var abandoned = dedicatedRestore.cancelPending(operationId);
-        if (abandoned == null) return;
-        try { sidecarWorker.execute(() -> dedicatedRestore.discard(abandoned)); }
-        catch (java.util.concurrent.RejectedExecutionException closed) {
-            // Child is already killed. Startup will classify any retained transient state.
-            MineBackup.LOGGER.debug("Sidecar cleanup deferred to next startup", closed);
-        }
-    }
-
-    private static boolean uncertainTransport(Throwable error) {
-        if (error == null) return false;
-        var code = KnotLinkCommunicationException.failure(error).code();
-        return code == OperationFailure.Code.CONNECTION_CLOSED || code == OperationFailure.Code.RESPONSE_TIMEOUT;
-    }
-
-    private void handleHandshake(Map<String, String> fields) {
-        MinecraftServer currentServer = server;
-        if (currentServer == null) {
-            MineBackup.LOGGER.debug("Ignoring handshake without an active Minecraft server.");
-            return;
-        }
-
-        String action = fields.get("action");
-        String world = fields.get("world");
-        String mainVersion = fields.get("version");
-        String minimumModVersion = fields.get("min_mod_version");
-        Optional<RestoreSession.Action> parsedAction = RestoreSession.Action.parse(action);
-        if (parsedAction.isEmpty()
-                || world == null
-                || world.isBlank()
-                || mainVersion == null
-                || mainVersion.isBlank()
-                || minimumModVersion == null
-                || minimumModVersion.isBlank()) {
-            MineBackup.LOGGER.warn("Rejected incomplete KnotLink handshake.");
-            return;
-        }
-        if (!VersionNumber.isAtLeast(mainVersion, MINIMUM_MAIN_VERSION)) {
-            currentServer.executeIfPossible(() -> feedback.broadcastOnServer(
-                    currentServer,
-                    Component.translatable(
-                            "minebackup.message.handshake.main_version_incompatible",
-                            mainVersion == null ? "?" : mainVersion,
-                            MINIMUM_MAIN_VERSION)));
-            return;
-        }
-        if (!VersionNumber.isAtLeast(ModInfo.version(), minimumModVersion)) {
-            currentServer.executeIfPossible(() -> feedback.broadcastOnServer(
-                    currentServer,
-                    Component.translatable(
-                            "minebackup.message.handshake.version_incompatible",
-                            ModInfo.version(),
-                            minimumModVersion == null ? "?" : minimumModVersion)));
-            return;
-        }
-        if (autoSave.isFrozen()) {
-            MineBackup.LOGGER.warn("Rejected KnotLink handshake while a hot backup is active.");
-            return;
-        }
-
-        if (parsedAction.get() == RestoreSession.Action.RESTORE && dedicatedServer) {
-            DedicatedRestoreManager.Availability availability = dedicatedRestore.availability(
-                    Config.get().dedicatedRestore(),
-                    Path.of("").toAbsolutePath());
-            if (!availability.available()) {
-                MineBackup.LOGGER.warn(
-                        "Rejected dedicated restore handshake: {}",
-                        availability.reason());
-                return;
-            }
-        }
-
-        WorldOperationSession.Token token = operations.handshake(fields);
-        if (token == null) {
-            MineBackup.LOGGER.debug("Rejected unrelated or out-of-phase handshake.");
-            return;
-        }
-
-        KnotLinkRequest responseRequest = KnotLinkRequest.command("HANDSHAKE_RESPONSE")
-                .conversation()
-                .field("mod_version", ModInfo.version());
-        knotLink.query(responseRequest).whenComplete((response, error) -> {
-            if (uncertainTransport(error)) return;
-            if (error != null || response == null || !response.isOk()) {
-                operations.failSession(token, OperationFailure.Code.COMMUNICATION_ERROR,
-                        "Handshake acknowledgement failed");
-                if (error != null) {
-                    MineBackup.LOGGER.warn("Failed to acknowledge KnotLink handshake", error);
-                } else {
-                    MineBackup.LOGGER.warn("KnotLink handshake was rejected: {}", (response == null ? "Missing backend response" : response.displayMessage()));
-                }
-                return;
-            }
-            if (operations.isCurrent(token)) showHandshakeSuccessOnce(currentServer, mainVersion);
-        });
-    }
-
-    private void handlePreHotBackup(Map<String, String> fields) {
-        var token = operations.consumeHandshake(RestoreSession.Action.BACKUP, fields);
-        MinecraftServer current = server;
-        if (token == null || current == null) return;
-        current.executeIfPossible(() -> {
-            if (server != current || !operations.isCurrent(token)) return;
-            if (!LocalSaveCoordinator.save(current)) {
-                operations.failSession(token, OperationFailure.Code.SAVE_TIMEOUT, "Minecraft could not save the current world");
-                return;
-            }
-            if (!operations.isCurrent(token)) return;
-            if (!autoSave.freeze(current, token)) {
-                operations.failSession(token, OperationFailure.Code.BUSY, "Automatic saving is already frozen");
-                return;
-            }
-            if (!operations.markFrozen(token)) { autoSave.unfreeze(token); return; }
-            knotLink.query(KnotLinkRequest.command("WORLD_SAVED").conversation(token.operationId()))
-                    .whenComplete((response, error) -> {
-                        if (!operations.isCurrent(token) || uncertainTransport(error)) return;
-                        if (error != null || response == null || !response.isOk()) {
-                            operations.failSession(token, error == null ? OperationFailure.Code.BACKEND_REJECTED
-                                    : KnotLinkCommunicationException.failure(error).code(),
-                                    error == null ? "Saved-world acknowledgement rejected" : error.toString());
-                        } else current.executeIfPossible(() -> {
-                            if (server == current && operations.isCurrent(token)) feedback.optional(
-                                    operations.activePresentation(), MessageSlot.BACKUP_STARTED,
-                                    Component.translatable("minebackup.broadcast.hot_backup.complete"), "current_save");
-                        });
+            pending.opening = true;
+            pending.startBefore = deadline;
+            ClientHooks.requestRejoin(
+                    pending.info,
+                    new RestoreUiMessages(
+                            Component.translatable("minebackup.message.restore.rejoining"),
+                            Component.translatable("minebackup.message.restore.success_overlay")),
+                    () -> live.getAsBoolean() && exit == pending,
+                    (ok, reason) -> {
+                        boolean correct =
+                                ok
+                                        && server != null
+                                        && server.getWorldPath(LevelResource.ROOT)
+                                                .toAbsolutePath()
+                                                .normalize()
+                                                .equals(pending.root);
+                        answer.complete(Ack.of(correct ? "opened" : "failed"));
                     });
-        });
-    }
-
-    private void handlePreHotRestore(Map<String, String> fields) {
-        var token = operations.consumeHandshake(RestoreSession.Action.RESTORE, fields);
+            return answer;
+        }
         MinecraftServer current = server;
-        if (token == null || current == null) return;
-        current.executeIfPossible(() -> {
-            if (server != current || !operations.isCurrent(token)) return;
-            if (dedicatedServer) beginDedicatedRestore(current, token);
-            else beginIntegratedRestore(current, token);
-        });
+        if (current == null || !operationsAvailable) {
+            answer.complete(Ack.of("abandoned"));
+            return answer;
+        }
+        current.executeIfPossible(
+                () -> {
+                    try {
+                        if (current != server
+                                || !live.getAsBoolean()
+                                || System.nanoTime() >= deadline) {
+                            answer.complete(Ack.of("abandoned"));
+                            return;
+                        }
+                        switch (step.kind()) {
+                            case "saveAndFreeze" -> {
+                                if (frozenStep != null
+                                        || !LocalSaveCoordinator.save(current)
+                                        || !live.getAsBoolean() || System.nanoTime()>=deadline
+                                        || !autoSave.freeze(current, step.id())) {
+                                    answer.complete(Ack.of("failed"));
+                                    return;
+                                }
+                                frozenStep = step.id();
+                                freezeUntil =
+                                        System.nanoTime()
+                                                + java.time.Duration.ofSeconds(180).toNanos();
+                                answer.complete(Ack.of("frozen"));
+                            }
+                            case "thaw" -> {
+                                boolean continuous =
+                                        step.releases().equals(frozenStep)
+                                                && System.nanoTime() < freezeUntil
+                                                && autoSave.continuous(current);
+                                if (step.releases().equals(frozenStep)) clearFreeze();
+                                answer.complete(new Ack("thawed", continuous, null));
+                            }
+                            case "saveAndExit" -> {
+                                if (exit != null
+                                        || frozenStep != null
+                                        || !LocalSaveCoordinator.save(current)) {
+                                    answer.complete(Ack.of("failed"));
+                                    return;
+                                }
+                                var lan = captureLanState(current);
+                                Path root =
+                                        current.getWorldPath(LevelResource.ROOT)
+                                                .toAbsolutePath()
+                                                .normalize();
+                                Exit pending =
+                                        new Exit(
+                                                current,
+                                                snap.operation(),
+                                                root,
+                                                new RestoreSession.RejoinInfo(
+                                                        root.getFileName().toString(),
+                                                        lan.reopen(),
+                                                        lan.port()));
+                                if (!dedicatedServer) {
+                                    // Persist the local close fence before any player is
+                                    // disconnected or release is acknowledged.
+                                    sidecarWorker.execute(
+                                            () -> {
+                                                try {
+                                                    link.rememberExit(root, b, snap.operation());
+                                                } catch (Exception failure) {
+                                                    answer.complete(Ack.of("failed"));
+                                                    return;
+                                                }
+                                                current.executeIfPossible(
+                                                        () -> {
+                                                            if (server != current
+                                                                    || !live.getAsBoolean()) {
+                                                                answer.complete(
+                                                                        Ack.of("abandoned"));
+                                                                return;
+                                                            }
+                                                            beginV3Release(
+                                                                    current, pending, root, answer,
+                                                                    live);
+                                                        });
+                                            });
+                                } else {
+                                    prepareV3Sidecar(current, b, snap, pending, answer, ()->live.getAsBoolean() && System.nanoTime()<deadline);
+                                }
+                            }
+                            default -> answer.complete(Ack.of("abandoned"));
+                        }
+                    } catch (RuntimeException error) {
+                        answer.completeExceptionally(error);
+                    }
+                });
+        return answer;
     }
 
-    private void beginDedicatedRestore(MinecraftServer currentServer, WorldOperationSession.Token token) {
-        Config.DedicatedRestore config = Config.get().dedicatedRestore();
-        if (!LocalSaveCoordinator.save(currentServer)) {
-            operations.failSession(token, OperationFailure.Code.SAVE_TIMEOUT, "Minecraft could not save before dedicated restore");
-            return;
-        }
-        if (!operations.isCurrent(token)) return;
-        InternalRestoreHandle handle = operations.activeRestore().orElse(null);
-        if (handle == null) return;
-        Path worldPath = currentServer.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize();
-        String worldId = operations.coordinatedWorld();
-        String wireId = operations.wireRequestId();
-        String wireFrom = operations.wireFrom();
-        if (!operations.prepareDedicated(token, config.sidecarStartTimeoutSeconds())) return;
-        sidecarWorker.execute(() -> {
-            var handoff = dedicatedRestore.prepare(config, Path.of("").toAbsolutePath(), worldPath,
-                    worldId, handle.id(), handle.callerId(), wireId, wireFrom,
-                    () -> operations.isCurrent(token) && server == currentServer && operationsAvailable);
-            if (!operations.isCurrent(token) || server != currentServer || !operationsAvailable) {
-                dedicatedRestore.discard(handoff);
-                return;
-            }
-            if (!handoff.accepted()) {
-                operations.failSession(token, OperationFailure.Code.SIDECAR_START_FAILED, handoff.reason());
-                return;
-            }
-            currentServer.executeIfPossible(() -> {
-                if (!operations.isCurrent(token) || server != currentServer || !operationsAvailable) {
-                    cancelSidecar(token.operationId());
-                    return;
-                }
-                if (!dedicatedRestore.claim(handoff)) {
-                    operations.failSession(token, OperationFailure.Code.SIDECAR_START_FAILED,
-                            "Sidecar exited before shutdown handoff");
-                    return;
-                }
-                var presentation = operations.activePresentation();
-                feedback.optional(presentation, MessageSlot.RESTORE_PREPARING,
-                        Component.translatable("minebackup.message.restore.preparing"), worldId, "");
-                disconnectPlayers(currentServer, feedback.resolve(presentation, MessageSlot.RESTORE_KICK,
-                        Component.translatable("minebackup.message.restore.kick"), worldId, ""));
-                feedback.optional(presentation, MessageSlot.RESTORE_REJOIN,
-                        Component.translatable("minebackup.message.restore.dedicated_handoff"), worldId, "");
-                operationsAvailable = false;
-                operations.completeDedicatedHandoff();
-                currentServer.halt(false);
-            });
-        });
+    private void beginV3Release(
+            MinecraftServer current,
+            Exit pending,
+            Path root,
+            CompletableFuture<Ack> answer,
+            BooleanSupplier live) {
+        exit = pending;
+        disconnectPlayers(current, Component.translatable("minebackup.message.restore.kick"));
+        sidecarWorker.execute(
+                () -> {
+                    int stable = 0;
+                    long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+                    try {
+                        while (System.nanoTime() < end && live.getAsBoolean() && exit == pending) {
+                            stable =
+                                    pending.stopped && WorldReleaseProbe.isReleased(root)
+                                            ? stable + 1
+                                            : 0;
+                            if (stable >= 3) {
+                                answer.complete(Ack.of("released"));
+                                return;
+                            }
+                            Thread.sleep(100);
+                        }
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                    answer.complete(Ack.of("failed"));
+                });
     }
 
-    private void beginIntegratedRestore(MinecraftServer currentServer, WorldOperationSession.Token token) {
-        if (!operations.isCurrent(token)) {
-            MineBackup.LOGGER.warn("Ignored duplicate hot restore request.");
-            return;
-        }
-
-        String levelId;
-        try {
-            levelId = resolveLevelId(currentServer);
-        } catch (IllegalStateException exception) {
-            MineBackup.LOGGER.error("Unable to identify the integrated world for hot restore", exception);
-            var presentation = operations.activePresentation();
-            operations.failSession(token,
-                    OperationFailure.Code.RESTORE_FAILED,
-                    exception.getMessage());
-            feedback.optional(
-                    presentation,
-                    MessageSlot.RESTORE_FAILED,
-                    Component.translatable("minebackup.message.restore.failed"),
-                    "",
-                    "",
-                    exception.getMessage());
-            return;
-        }
-        if (!LocalSaveCoordinator.save(currentServer)) {
-            var presentation = operations.activePresentation();
-            operations.failSession(token,
-                    OperationFailure.Code.RESTORE_FAILED,
-                    "Minecraft could not save the current world before restore");
-            feedback.optional(
-                    presentation,
-                    MessageSlot.RESTORE_FAILED,
-                    Component.translatable("minebackup.message.restore.failed"),
-                    "",
-                    "",
-                    "save failed");
-            return;
-        }
-
-        if (!operations.isCurrent(token)) return;
-        LanState lanState = captureLanState(currentServer);
-        if (!operations.beginWorldRelease(token, new RestoreSession.RejoinInfo(levelId, lanState.reopen(), lanState.port()))) {
-            operations.failSession(token,
-                    OperationFailure.Code.BUSY,
-                    "Restore session is not ready");
-            return;
-        }
-
-        feedback.optional(
-                operations.activePresentation(),
-                MessageSlot.RESTORE_PREPARING,
-                Component.translatable("minebackup.message.restore.preparing"));
-        startReleaseWatcher(currentServer, token);
-        disconnectPlayers(
-                currentServer,
-                feedback.resolve(
-                        operations.activePresentation(),
-                        MessageSlot.RESTORE_KICK,
-                        Component.translatable("minebackup.message.restore.kick")));
+    public ExitPermission openingPermission(Path root) {
+        var b = link.binding();
+        var pending = exit;
+        if (pending == null
+                || !pending.opening
+                || b == null
+                || !pending.root.equals(root.toAbsolutePath().normalize())) return null;
+        return new ExitPermission(pending.operation, b.endpoint().domain(), pending.startBefore);
     }
 
-    private void startReleaseWatcher(MinecraftServer restoreServer, WorldOperationSession.Token token) {
-        ReleasePoller poller = new ReleasePoller(restoreServer, token);
-        releasePoller = poller;
-        poller.future = coordinator.scheduleAtFixedRate(
-                poller,
-                100L,
-                100L,
-                TimeUnit.MILLISECONDS);
-    }
+    public record ExitPermission(UUID operation, UUID domain, long startBefore) {}
 
-    private void handleRejoinWorld(Map<String, String> fields) {
-        var rejoin = operations.beginRejoin(fields);
-        if (rejoin == null) return;
-        var token = operations.sessionToken();
-        var presentation = operations.activePresentation();
-        String world = fields.getOrDefault("world", "");
-        String backup = fields.getOrDefault("file", "");
-        ClientHooks.requestRejoin(rejoin, new RestoreUiMessages(
-                feedback.resolve(presentation, MessageSlot.RESTORE_REJOIN,
-                        Component.translatable("minebackup.message.restore.rejoining"), world, backup),
-                feedback.resolve(presentation, MessageSlot.RESTORE_SUCCEEDED,
-                        Component.translatable("minebackup.message.restore.success_overlay"), world, backup)),
-                () -> operations.isCurrent(token),
-                (success, reason) -> operations.completeClientRejoin(token, success, reason));
-    }
-
-    private void broadcastInformationalEventOnServer(
-            MinecraftServer currentServer,
-            Map<String, String> fields,
-            String event,
-            com.leafuke.minebackup.api.v2.OperationPresentation presentation) {
-        Component world = literalOrUnknown(
-                firstNonBlank(fields.get("world"), fields.get("folder")),
-                "minebackup.message.unknown_world");
-        Component file = literalOrUnknown(fields.get("file"), "minebackup.message.unknown_file");
-        Component error = FailureMessages.message(OperationFailure.Code.BACKEND_REJECTED);
-        if (fields.get("error") != null || "backup_failed".equals(event) || "restore_failed".equals(event)) {
-            MineBackup.LOGGER.warn("Backend event {} failed: {}", event, fields);
-        }
-        Component message = switch (event) {
-            case "backup_started" -> Component.translatable("minebackup.broadcast.backup.started", world);
-            case "backup_success" -> Component.translatable("minebackup.broadcast.backup.success", world, file);
-            case "backup_failed" -> Component.translatable("minebackup.broadcast.backup.failed", world, error);
-            case "restore_started" -> Component.translatable("minebackup.broadcast.restore.started", world);
-            case "restore_success" -> Component.translatable("minebackup.broadcast.restore.success", world);
-            case "restore_failed" -> Component.translatable("minebackup.broadcast.restore.failed", world, error);
-            default -> null;
-        };
-        if (message != null) {
-            MessageSlot slot = switch (event) {
-                case "backup_started" -> MessageSlot.BACKUP_STARTED;
-                case "backup_success" -> MessageSlot.BACKUP_SUCCEEDED;
-                case "backup_failed" -> MessageSlot.BACKUP_FAILED;
-                case "restore_started" -> MessageSlot.RESTORE_PREPARING;
-                case "restore_success" -> MessageSlot.RESTORE_SUCCEEDED;
-                case "restore_failed" -> MessageSlot.RESTORE_FAILED;
-                default -> throw new IllegalStateException("Unexpected feedback event: " + event);
-            };
-            if (presentation.feedbackPolicy()
-                    != com.leafuke.minebackup.api.v2.FeedbackPolicy.CALLER_MANAGED) {
-                feedback.broadcastOnServer(
-                        currentServer,
-                        feedback.resolve(
-                                presentation,
-                                slot,
-                                message,
-                                world,
-                                file,
-                                error));
-            }
-        }
-    }
-
-    private void showHandshakeSuccessOnce(MinecraftServer currentServer, String mainVersion) {
-        if (operations.activePresentation().feedbackPolicy()
-                == com.leafuke.minebackup.api.v2.FeedbackPolicy.CALLER_MANAGED) {
+    private void prepareV3Sidecar(
+            MinecraftServer current,
+            InteropClient.Binding binding,
+            InteropSnapshot snap,
+            Exit pending,
+            CompletableFuture<Ack> answer,
+            BooleanSupplier live) {
+        var config = Config.get().dedicatedRestore();
+        Path cwd = Path.of("").toAbsolutePath();
+        var available = dedicatedRestore.availability(config, cwd);
+        if (!available.available()) {
+            answer.complete(Ack.of("failed"));
             return;
         }
-        String displayVersion = mainVersion == null ? "?" : mainVersion;
-        synchronized (this) {
-            if (displayVersion.equals(lastHandshakeNoticeVersion)) {
-                return;
-            }
-            lastHandshakeNoticeVersion = displayVersion;
-        }
-        currentServer.executeIfPossible(() -> feedback.broadcastOnServer(
-                currentServer,
-                Component.translatable("minebackup.message.handshake.success", displayVersion)));
+        sidecarWorker.execute(
+                () -> {
+                    try {
+                        var handoff =
+                                dedicatedRestore.startInterop(
+                                        config,
+                                        cwd,
+                                        pending.root,
+                                        available.resolution().command(),
+                                        binding,
+                                        snap,
+                                        () ->
+                                                server == current
+                                                        && live.getAsBoolean()
+                                                        && operationsAvailable);
+                        if(server!=current || !live.getAsBoolean() || !operationsAvailable || !handoff.commit()){
+                            handoff.abandon();answer.complete(Ack.of("abandoned"));return;
+                        }
+                        current.executeIfPossible(
+                                () -> {
+                                    if (server != current
+                                            || !live.getAsBoolean()
+                                            || !operationsAvailable
+                                            || !handoff.child().isAlive()) {
+                                        handoff.abandon();
+                                        answer.complete(Ack.of("abandoned"));
+                                        return;
+                                    }
+                                    exit = pending;
+                                    disconnectPlayers(
+                                            current,
+                                            Component.translatable(
+                                                    "minebackup.message.restore.kick"));
+                                    if (operations
+                                            .activeSnapshot()
+                                            .filter(s -> s.requestId().equals(snap.operation()))
+                                            .isPresent()) operations.completeDedicatedHandoff();
+                                    operationsAvailable = false;
+                                    current.halt(false);
+                                    // released is owned by the committed child after parent JVM
+                                    // exit.
+                                });
+                    } catch (Exception failure) {
+                        answer.complete(Ack.of("failed"));
+                    }
+                });
     }
 
     private static LanState captureLanState(MinecraftServer server) {
@@ -665,51 +614,6 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         return owner != null && owner.id().equals(player.getGameProfile().id());
     }
 
-    private static String resolveLevelId(MinecraftServer server) {
-        Path root = server.getWorldPath(LevelResource.ROOT);
-        Path cursor = root;
-        for (int depth = 0; depth < 6 && cursor != null; depth++) {
-            if (Files.exists(cursor.resolve("level.dat")) && cursor.getFileName() != null) {
-                String candidate = sanitizeLevelId(cursor.getFileName().toString());
-                if (candidate != null) {
-                    return candidate;
-                }
-            }
-            cursor = cursor.getParent();
-        }
-
-        String levelName = sanitizeLevelId(server.getWorldData().getLevelName());
-        if (levelName != null) {
-            return levelName;
-        }
-        throw new IllegalStateException("Unable to resolve a safe Minecraft level id");
-    }
-
-    private static String sanitizeLevelId(String value) {
-        if (value == null) {
-            return null;
-        }
-        String normalized = value.trim();
-        if (normalized.isEmpty()
-                || ".".equals(normalized)
-                || "..".equals(normalized)
-                || normalized.contains("/")
-                || normalized.contains("\\")) {
-            return null;
-        }
-        return normalized;
-    }
-
-    private static Component literalOrUnknown(String value, String unknownTranslationKey) {
-        return value == null || value.isBlank()
-                ? Component.translatable(unknownTranslationKey)
-                : Component.literal(value);
-    }
-
-    private static String firstNonBlank(String first, String second) {
-        return first != null && !first.isBlank() ? first : second;
-    }
-
     @Override
     public void close() {
         ClientHooks.clear();
@@ -720,10 +624,46 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         // all new server-thread tasks. Restoring the noSave flags is a local,
         // synchronous cleanup and must never enqueue work during shutdown.
         autoSave.unfreeze();
-        knotLink.close();
-        cancelSidecar(null);
+        link.close();
+
         sidecarWorker.shutdownNow();
         coordinator.shutdownNow();
+    }
+
+    @Override
+    public CompletionStage<com.leafuke.minebackup.api.v2.LinkedOperationStatus> observeOperation(
+            UUID domain, UUID id) {
+        return link.observe(domain, id)
+                .handle(
+                        (s, err) -> {
+                            if (err != null)
+                                return new com.leafuke.minebackup.api.v2.LinkedOperationStatus(
+                                        domain,
+                                        id,
+                                        Optional.empty(),
+                                        Optional.of(KnotLinkCommunicationException.failure(err)));
+                            return new com.leafuke.minebackup.api.v2.LinkedOperationStatus(
+                                    domain,
+                                    id,
+                                    Optional.of(
+                                            new com.leafuke.minebackup.api.v2.LinkedOperationStatus
+                                                    .Snapshot(
+                                                    s.kind(),
+                                                    s.target(),
+                                                    s.rev(),
+                                                    s.state(),
+                                                    s.result() == null
+                                                            ? Optional.empty()
+                                                            : Optional.of(
+                                                                    s.result()
+                                                                            .get("outcome")
+                                                                            .getAsString()),
+                                                    Optional.ofNullable(s.disk()),
+                                                    s.recoveryPending(),
+                                                    Optional.ofNullable(s.reopen()),
+                                                    Optional.ofNullable(s.followUp()))),
+                                    Optional.empty());
+                        });
     }
 
     @Override
@@ -817,24 +757,31 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         return operations.listCurrentBackups(request);
     }
 
-    private final BackendQueries sharedBackendQueries = new BackendQueries(knotLink::query,
-            () -> operationsAvailable ? server : null, knotLink::signalChannelState, knotLink::capabilityEpoch);
-    { operations.capabilitySource(sharedBackendQueries::capabilities); }
-
-    private BackendQueries backendQueries() { return sharedBackendQueries; }
+    private final BackendQueries sharedBackendQueries =
+            new BackendQueries(
+                    knotLink::query,
+                    () -> this,
+                    () ->
+                            link.signalConnected()
+                                    ? com.leafuke.minebackup.api.v2.BackendStatusResult.ChannelState
+                                            .CONNECTED
+                                    : com.leafuke.minebackup.api.v2.BackendStatusResult.ChannelState
+                                            .UNKNOWN);
 
     @Override
     public CompletionStage<com.leafuke.minebackup.api.v2.BackendCapabilitiesResult> backendCapabilities(
             com.leafuke.minebackup.api.v2.BackendCapabilitiesRequest request) {
         java.util.Objects.requireNonNull(request, "request");
-        return backendQueries().capabilities(request.refresh());
+        return request.refresh()
+                ? link.refresh().thenCompose(status -> knotLink.capabilities())
+                : knotLink.capabilities();
     }
 
     @Override
     public CompletionStage<com.leafuke.minebackup.api.v2.BackendStatusResult> backendStatus(
             com.leafuke.minebackup.api.v2.BackendStatusRequest request) {
         java.util.Objects.requireNonNull(request, "request");
-        return backendQueries().status();
+        return sharedBackendQueries.status();
     }
 
     @Override
@@ -989,81 +936,4 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
     private record LanState(boolean reopen, int port) {
     }
 
-    private final class ReleasePoller implements Runnable {
-        private final MinecraftServer restoreServer;
-        private final Path worldRoot;
-        private final WorldOperationSession.Token token;
-        private final AtomicInteger readyStreak = new AtomicInteger();
-        private volatile ScheduledFuture<?> future;
-        private volatile boolean serverStopped;
-        private volatile boolean playersCleared;
-
-        private ReleasePoller(MinecraftServer restoreServer, WorldOperationSession.Token token) {
-            this.restoreServer = restoreServer;
-            this.token = token;
-            worldRoot = restoreServer.getWorldPath(LevelResource.ROOT);
-        }
-
-        private void markServerStopped(boolean allPlayersCleared) {
-            serverStopped = true;
-            playersCleared = allPlayersCleared;
-            if (!allPlayersCleared) {
-                MineBackup.LOGGER.error(
-                        "Integrated server stopped before all players were disconnected.");
-            }
-        }
-
-        @Override
-        public void run() {
-            if (!operations.isReleasing(token)) {
-                cancel();
-                return;
-            }
-            if (!serverStopped || !playersCleared || !WorldReleaseProbe.isReleased(worldRoot)) {
-                readyStreak.set(0);
-                return;
-            }
-            if (readyStreak.incrementAndGet() < READY_STREAK_REQUIRED) {
-                return;
-            }
-            if (!operations.markWorldReleased(token)) {
-                cancel();
-                return;
-            }
-
-            cancel();
-            knotLink.query(KnotLinkRequest.command("WORLD_SAVE_AND_EXIT_COMPLETE").conversation(token.operationId()))
-                    .whenComplete((response, error) -> {
-                        if (!operations.isCurrent(token) || uncertainTransport(error)) return;
-                        if (error == null && response != null && response.isOk()) {
-                            return;
-                        }
-                        if (error != null) {
-                            MineBackup.LOGGER.error(
-                                    "Failed to acknowledge world release to the backend",
-                                    error);
-                        } else {
-                            MineBackup.LOGGER.error(
-                                    "Backend rejected world release acknowledgement: {}",
-                                    (response == null ? "Missing backend response" : response.displayMessage()));
-                        }
-                        operations.failSession(token,
-                                error == null ? OperationFailure.Code.BACKEND_REJECTED
-                                        : KnotLinkCommunicationException.failure(error).code(),
-                                error == null
-                                        ? (response == null ? "Missing backend response" : response.displayMessage())
-                                        : error.getMessage());
-                    });
-        }
-
-        private void cancel() {
-            ScheduledFuture<?> current = future;
-            if (current != null) {
-                current.cancel(false);
-            }
-            if (releasePoller == this) {
-                releasePoller = null;
-            }
-        }
-    }
 }

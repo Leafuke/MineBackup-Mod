@@ -80,7 +80,7 @@ public record InteropSnapshot(
             if ((action.equals("open") || action.equals("saveAndExit")) && !kind.equals("restore"))
                 throw new IOException("invalid_action");
             if (action.equals("open")
-                    && (pending || !"eligible".equals(reopen) || "unknown".equals(disk)))
+                    && ("queued".equals(state) || "unresolved".equals(state) || pending || !"eligible".equals(reopen) || "unknown".equals(disk)))
                 throw new IOException("unsafe_open");
             step =
                     new Action(

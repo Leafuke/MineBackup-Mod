@@ -71,7 +71,7 @@ public final class InteropFiles {
         return fallback;
     }
 
-    static List<Endpoint> endpoints(Path directory) throws IOException {
+    public static List<Endpoint> endpoints(Path directory) throws IOException {
         if (!Files.exists(directory)) return List.of();
         try (var paths = Files.newDirectoryStream(directory, "*.json")) {
             var endpoints = new ArrayList<Endpoint>();

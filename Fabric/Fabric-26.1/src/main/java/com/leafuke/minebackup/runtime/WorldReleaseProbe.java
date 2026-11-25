@@ -18,13 +18,13 @@ public final class WorldReleaseProbe {
     }
 
     public static boolean isReleased(Path root) {
-        return canAcquireSessionLock(root) && canAccessCriticalFiles(root);
+        return Files.isDirectory(root) && canAcquireSessionLock(root) && canAccessCriticalFiles(root);
     }
 
     static boolean canAcquireSessionLock(Path root) {
         Path lockPath = root.resolve("session.lock");
-        if (!Files.exists(lockPath)) {
-            return true;
+        if (!Files.isRegularFile(lockPath)) {
+            return false;
         }
         try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.WRITE);
              FileLock lock = channel.tryLock()) {

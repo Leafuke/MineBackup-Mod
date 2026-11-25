@@ -2,8 +2,8 @@ package com.leafuke.minebackup.client;
 
 import com.leafuke.minebackup.MineBackup;
 import com.leafuke.minebackup.config.Config;
-import com.leafuke.minebackup.knotlink.protocol.KnotLinkRequest;
 import com.leafuke.minebackup.restore.RestoreSession;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.GenericMessageScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
@@ -14,9 +14,8 @@ import net.minecraft.util.HttpUtil;
 import net.minecraft.world.level.GameType;
 
 public final class ClientRejoinController {
-    private static final int REJOIN_DELAY_TICKS = 40;
+    private static final int REJOIN_DELAY_TICKS = 1;
     private static final int REJOIN_DEADLINE_TICKS = 500;
-    private static final int MAX_SYNCHRONOUS_ATTEMPTS = 3;
     private static final int LAN_REOPEN_INITIAL_DELAY_TICKS = 20;
 
     private static State state = State.IDLE;
@@ -24,8 +23,6 @@ public final class ClientRejoinController {
     private static RestoreUiMessages uiMessages;
     private static int delayTicks;
     private static int elapsedTicks;
-    private static int attempts;
-    private static boolean resultReported;
     private static java.util.function.BooleanSupplier currentSession = () -> true;
     private static java.util.function.BiConsumer<Boolean, String> completion = MineBackup::completeClientRestore;
     private static long clientGeneration;
@@ -48,35 +45,35 @@ public final class ClientRejoinController {
 
     public static void requestRejoin(Minecraft client, RestoreSession.RejoinInfo info, RestoreUiMessages messages,
             java.util.function.BooleanSupplier current, java.util.function.BiConsumer<Boolean, String> finished) {
-        client.execute(() -> {
-            if (!current.getAsBoolean()) return;
-            if (state != State.IDLE) {
-                MineBackup.LOGGER.warn("Rejected duplicate client rejoin request.");
-                return;
-            }
-            state = State.DELAYING;
-            currentSession = current;
-            completion = finished;
-            clientGeneration++;
-            resultReported = false;
-            String levelId = sanitizeLevelId(info.levelId());
-            if (levelId == null) {
-                finishFailure(client, "invalid_level_id");
-                return;
-            }
+        client.execute(
+                () -> {
+                    if (!current.getAsBoolean()) return;
+                    if (state != State.IDLE) {
+                        MineBackup.LOGGER.warn("Rejected duplicate client rejoin request.");
+                        return;
+                    }
+                    state = State.DELAYING;
+                    currentSession = current;
+                    completion = finished;
+                    clientGeneration++;
+                    String levelId = sanitizeLevelId(info.levelId());
+                    if (levelId == null) {
+                        finishFailure(client, "invalid_level_id");
+                        return;
+                    }
 
-            rejoinInfo = new RestoreSession.RejoinInfo(levelId, info.reopenLan(), info.lanPort());
-            uiMessages = messages;
-            delayTicks = REJOIN_DELAY_TICKS;
-            elapsedTicks = 0;
-            attempts = 0;
+                    rejoinInfo =
+                            new RestoreSession.RejoinInfo(
+                                    levelId, info.reopenLan(), info.lanPort());
+                    uiMessages = messages;
+                    delayTicks = REJOIN_DELAY_TICKS;
+                    elapsedTicks = 0;
 
-            if (client.level != null) {
-                Component notice = uiMessages.rejoining();
-                client.disconnect(new GenericMessageScreen(notice), false);
-                delayTicks = 20;
-            }
-        });
+                    if (client.level != null) {
+                        finishFailure(client, "world_changed");
+                        return;
+                    }
+                });
     }
 
     public static void restoreFailed(Minecraft client, Component message) {
@@ -109,7 +106,13 @@ public final class ClientRejoinController {
             return;
         }
 
-        if (!currentSession.getAsBoolean()) { resetRejoinState(); resetLanReopenState(); return; }
+        if (!currentSession.getAsBoolean()) {
+            var abandoned = completion;
+            resetRejoinState();
+            resetLanReopenState();
+            abandoned.accept(false, "world_changed");
+            return;
+        }
         elapsedTicks++;
         if (elapsedTicks >= REJOIN_DEADLINE_TICKS) {
             finishFailure(client, "timeout");
@@ -118,7 +121,13 @@ public final class ClientRejoinController {
 
         if (state == State.OPENING) {
             if (client.level != null && client.player != null) {
-                finishSuccess(client);
+                var joined=client.getSingleplayerServer();
+                if(joined==null || rejoinInfo==null || !joined.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                        .toAbsolutePath().normalize().equals(client.getLevelSource().getBaseDir().resolve(rejoinInfo.levelId()).toAbsolutePath().normalize())){
+                    var finish=completion;
+                    resetRejoinState();resetLanReopenState();
+                    finish.accept(false,"world_changed");
+                }else finishSuccess(client);
             }
             return;
         }
@@ -145,33 +154,39 @@ public final class ClientRejoinController {
             finishFailure(client, "invalid_level_id");
             return;
         }
-
-        attempts++;
         state = State.OPENING;
         client.setScreen(new GenericMessageScreen(uiMessages.rejoining()));
         try {
             long generation = clientGeneration;
-            client.createWorldOpenFlows().openWorld(levelId, () -> client.execute(() -> {
-                if (clientGeneration == generation && currentSession.getAsBoolean()) finishFailure(client, "cancelled");
-            }));
+            WorldOpenGate.automatic(
+                    () ->
+                            client.createWorldOpenFlows()
+                                    .openWorld(
+                                            levelId,
+                                            () ->
+                                                    client.execute(
+                                                            () -> {
+                                                                if (clientGeneration == generation
+                                                                        && currentSession
+                                                                                .getAsBoolean())
+                                                                    finishFailure(
+                                                                            client, "cancelled");
+                                                            })));
         } catch (RuntimeException exception) {
-            MineBackup.LOGGER.warn(
-                    "Synchronous world rejoin attempt {}/{} failed",
-                    attempts,
-                    MAX_SYNCHRONOUS_ATTEMPTS,
-                    exception);
-            if (attempts < MAX_SYNCHRONOUS_ATTEMPTS
-                    && elapsedTicks + REJOIN_DELAY_TICKS < REJOIN_DEADLINE_TICKS) {
-                state = State.DELAYING;
-                delayTicks = REJOIN_DELAY_TICKS;
-                return;
-            }
-            finishFailure(client, "max_retries_exceeded");
+            MineBackup.LOGGER.warn("Opening the restored world failed", exception);
+
+            finishFailure(client, "open_failed");
         }
     }
 
     private static void finishSuccess(Minecraft client) {
-        if (!currentSession.getAsBoolean()) { resetRejoinState(); resetLanReopenState(); return; }
+        if (!currentSession.getAsBoolean()) {
+            var abandoned = completion;
+            resetRejoinState();
+            resetLanReopenState();
+            abandoned.accept(false, "world_changed");
+            return;
+        }
         if (state != State.OPENING) {
             return;
         }
@@ -180,7 +195,6 @@ public final class ClientRejoinController {
                 ? Component.translatable("minebackup.message.restore.success_overlay")
                 : uiMessages.succeeded();
         var finished = completion;
-        reportResult("success", null);
         resetRejoinState();
         if (completedInfo != null) {
             scheduleLanReopen(completedInfo);
@@ -192,12 +206,17 @@ public final class ClientRejoinController {
     }
 
     private static void finishFailure(Minecraft client, String reason) {
-        if (!currentSession.getAsBoolean()) { resetRejoinState(); resetLanReopenState(); return; }
+        if (!currentSession.getAsBoolean()) {
+            var abandoned = completion;
+            resetRejoinState();
+            resetLanReopenState();
+            abandoned.accept(false, "world_changed");
+            return;
+        }
         if (state == State.IDLE) {
             return;
         }
         var finished = completion;
-        reportResult("failure", reason);
         resetRejoinState();
         resetLanReopenState();
         finished.accept(false, reason);
@@ -217,26 +236,6 @@ public final class ClientRejoinController {
         }
     }
 
-    private static void reportResult(String result, String reason) {
-        if (resultReported) {
-            return;
-        }
-        resultReported = true;
-        KnotLinkRequest request = KnotLinkRequest.command("REJOIN_RESULT")
-                .conversation()
-                .field("result", result);
-        if (reason != null && !reason.isBlank()) {
-            request.field("reason", reason);
-        }
-        MineBackup.knotLink().query(request).whenComplete((response, error) -> {
-            if (error != null) {
-                MineBackup.LOGGER.warn("Failed to report rejoin result", error);
-            } else if (!response.isOk()) {
-                MineBackup.LOGGER.warn("Backend rejected rejoin result: {}", response.displayMessage());
-            }
-        });
-    }
-
     private static void resetRejoinState() {
         clientGeneration++;
         currentSession = () -> true;
@@ -246,7 +245,6 @@ public final class ClientRejoinController {
         uiMessages = null;
         delayTicks = 0;
         elapsedTicks = 0;
-        attempts = 0;
     }
 
     private static void scheduleLanReopen(RestoreSession.RejoinInfo info) {

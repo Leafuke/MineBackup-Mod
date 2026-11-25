@@ -1,6 +1,7 @@
 package com.leafuke.minebackup.runtime;
 
 import com.leafuke.minebackup.MineBackup;
+
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 
@@ -9,6 +10,7 @@ import java.util.List;
 
 public final class AutoSaveController {
     private final List<ServerLevel> frozenLevels = new ArrayList<>();
+    private final java.util.Set<ServerLevel> observedLevels = new java.util.HashSet<>();
     private boolean frozen;
     private Object owner;
 
@@ -23,7 +25,9 @@ public final class AutoSaveController {
         }
 
         frozenLevels.clear();
+        observedLevels.clear();
         for (ServerLevel level : server.getAllLevels()) {
+            observedLevels.add(level);
             if (level != null && !level.noSave) {
                 level.noSave = true;
                 frozenLevels.add(level);
@@ -45,10 +49,21 @@ public final class AutoSaveController {
             }
         }
         frozenLevels.clear();
+        observedLevels.clear();
         frozen = false;
         owner = null;
         MineBackup.LOGGER.info("Auto-save resumed.");
         return true;
+    }
+
+    public synchronized boolean continuous(MinecraftServer server) {
+        if (!frozen) return false;
+        int count = 0;
+        for (ServerLevel level : server.getAllLevels()) {
+            if (level == null || !level.noSave || !observedLevels.contains(level)) return false;
+            count++;
+        }
+        return count == observedLevels.size();
     }
 
     public synchronized boolean isFrozen() {

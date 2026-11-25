@@ -141,6 +141,9 @@ public final class InteropWire {
 
     public static JsonObject call(UUID instance, String type, JsonObject body, int budgetMs)
             throws Exception {
+        return callAt(6376,instance,type,body,budgetMs);
+    }
+    static JsonObject callAt(int queryPort,UUID instance,String type,JsonObject body,int budgetMs)throws Exception {
         UUID rid = UUID.randomUUID();
         String payload =
                 encode(
@@ -158,7 +161,7 @@ public final class InteropWire {
         long start = System.nanoTime();
         try (var q =
                 new OpenSocketQuerier(
-                        "frmc3", "q." + instance, "127.0.0.1", 6376, budgetMs, MAX_BYTES)) {
+                        "frmc3", "q." + instance, "127.0.0.1", queryPort, budgetMs, MAX_BYTES)) {
             long remaining = budgetMs - TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
             if (remaining <= 0) throw new java.util.concurrent.TimeoutException();
             String reply = q.query(payload, remaining, TimeUnit.MILLISECONDS);
