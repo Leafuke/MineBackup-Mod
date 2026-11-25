@@ -1,0 +1,118 @@
+{
+  "version": 3,
+  "messages": [
+    {
+      "v": 3,
+      "type": "submit",
+      "rid": "10000000-0000-4000-8000-000000000001",
+      "instanceId": "20000000-0000-4000-8000-000000000001",
+      "body": {
+        "operationId": "30000000-0000-4000-8000-000000000001",
+        "admissionRef": "w7",
+        "sessionId": "40000000-0000-4000-8000-000000000001",
+        "bindingId": "50000000-0000-4000-8000-000000000001",
+        "kind": "backup",
+        "targetRef": "world-27",
+        "options": {
+          "protect": true,
+          "comment": "岩&*&矿"
+        }
+      }
+    },
+    {
+      "v": 3,
+      "type": "reply",
+      "rid": "10000000-0000-4000-8000-000000000001",
+      "instanceId": "20000000-0000-4000-8000-000000000001",
+      "ok": true,
+      "body": {
+        "operationId": "30000000-0000-4000-8000-000000000001",
+        "kind": "backup",
+        "targetRef": "world-27",
+        "rev": 1,
+        "state": "queued"
+      }
+    },
+    {
+      "v": 3,
+      "type": "changed",
+      "instanceId": "20000000-0000-4000-8000-000000000001",
+      "sessionId": "40000000-0000-4000-8000-000000000001",
+      "operationId": "30000000-0000-4000-8000-000000000001",
+      "rev": 5
+    },
+    {
+      "v": 3,
+      "type": "get",
+      "rid": "10000000-0000-4000-8000-000000000002",
+      "instanceId": "20000000-0000-4000-8000-000000000001",
+      "body": {
+        "operationId": "30000000-0000-4000-8000-000000000001",
+        "sessionId": "40000000-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "v": 3,
+      "type": "reply",
+      "rid": "10000000-0000-4000-8000-000000000002",
+      "instanceId": "20000000-0000-4000-8000-000000000001",
+      "ok": true,
+      "body": {
+        "operationId": "30000000-0000-4000-8000-000000000001",
+        "kind": "backup",
+        "targetRef": "world-27",
+        "rev": 5,
+        "state": "finished",
+        "result": {
+          "outcome": "succeeded",
+          "effect": "reused",
+          "backupRef": "version-78",
+          "important": true
+        }
+      }
+    },
+    {
+      "v": 3,
+      "type": "reply",
+      "rid": "10000000-0000-4000-8000-000000000003",
+      "instanceId": "20000000-0000-4000-8000-000000000001",
+      "ok": true,
+      "body": {
+        "operationId": "30000000-0000-4000-8000-000000000002",
+        "kind": "restore",
+        "targetRef": "world-27",
+        "rev": 7,
+        "state": "unresolved",
+        "phase": "recovering",
+        "disk": "committed",
+        "recoveryPending": true,
+        "reopen": "blocked",
+        "effectiveMode": "clean",
+        "warningCodes": [
+          "recovery_required"
+        ]
+      }
+    },
+    {
+      "v": 3,
+      "type": "reply",
+      "rid": "10000000-0000-4000-8000-000000000004",
+      "instanceId": "20000000-0000-4000-8000-000000000001",
+      "ok": false,
+      "error": {
+        "code": "step_expired"
+      }
+    }
+  ],
+  "strings": [
+    "岩&*&矿",
+    "&",
+    "\\u0026",
+    "a\\b;世界,🌙"
+  ],
+  "invalid": [
+    "{\"v\":3,\"v\":3}",
+    "{\"v\":NaN}",
+    "{\"type\":\"hello\",}"
+  ]
+}
