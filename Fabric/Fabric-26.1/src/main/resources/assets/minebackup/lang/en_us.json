@@ -190,5 +190,8 @@
   "minebackup.interop.stage.recovery_required": "Keep the world closed. Complete recovery in the original software.",
   "minebackup.interop.busy": "A world operation or handoff is active. Wait for it to finish.",
   "minebackup.message.restore.rejoin_error.open_failed": "World files restored; opening failed. Check Link Status before trying to return.",
-  "minebackup.message.restore.rejoin_error.world_changed": "You opened another world. Automatic rejoin was stopped."
+  "minebackup.message.restore.rejoin_error.world_changed": "You opened another world. Automatic rejoin was stopped.",
+  "minebackup.interop.original_opened": "The original world has reopened.",
+  "minebackup.interop.rolled_back": "The restore was rolled back. Check operation %s in the original software.",
+  "minebackup.interop.failed": "Operation %s did not complete. Check the reason in the original backup software."
 }

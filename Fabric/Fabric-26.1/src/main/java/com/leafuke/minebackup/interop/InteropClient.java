@@ -285,9 +285,11 @@ public final class InteropClient implements AutoCloseable {
 
     private Status discover(World origin, String selected) throws Exception {
         var candidates = new ArrayList<Choice>();
-        var routes = InteropFiles.endpoints(endpoints);
+        var inventory = InteropFiles.scan(endpoints);
+        var routes = inventory.endpoints();
         String problem = "offline", detail = "";
-        boolean unverified = false;
+        boolean unverified = inventory.incomplete();
+        if (unverified) problem = "unverified";
         String saved = origin == null ? null : readPreference(origin);
         var verifiedDomains = new java.util.HashSet<UUID>();
         for (Endpoint endpoint : routes) {
@@ -343,7 +345,7 @@ public final class InteropClient implements AutoCloseable {
                 detail = endpoint.display();
             }
         }
-        if (routes.isEmpty() && legacyDiagnostics) problem = diagnoseLegacy();
+        if (routes.isEmpty() && !unverified && legacyDiagnostics) problem = diagnoseLegacy();
         if (world != origin || closed) return status;
         if (origin == null) {
             recover();

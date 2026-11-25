@@ -190,5 +190,8 @@
   "minebackup.interop.stage.recovery_required": "请保持世界关闭，先在原软件完成恢复。",
   "minebackup.interop.busy": "当前世界有操作或交接正在进行，请等待原任务结束。",
   "minebackup.message.restore.rejoin_error.open_failed": "世界文件已还原，但打开失败。请先在联动状态中确认是否可重新进入。",
-  "minebackup.message.restore.rejoin_error.world_changed": "你已进入其他世界，已停止自动重进。"
+  "minebackup.message.restore.rejoin_error.world_changed": "你已进入其他世界，已停止自动重进。",
+  "minebackup.interop.original_opened": "已重新进入还原前的世界。",
+  "minebackup.interop.rolled_back": "本次还原未完成，已回滚。请在原软件查看操作 %s。",
+  "minebackup.interop.failed": "操作 %s 未能完成，请在原备份软件中查看原因。"
 }

@@ -290,6 +290,10 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         }
     }
 
+    private final java.util.LinkedHashSet<UUID> recoveryNotices = new java.util.LinkedHashSet<>();
+
+    public synchronized boolean presented(UUID operation){ return Boolean.TRUE.equals(announced.get(operation)) || recoveryNotices.contains(operation); }
+
     private void clearFreeze() {
         UUID step = frozenStep;
         if (step != null) autoSave.unfreeze(step);
@@ -307,6 +311,15 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         operations.observe(s);
         if (!visible || !Set.of("backup", "restore", "backupAll").contains(s.kind())) return;
         Boolean terminalSeen = announced.get(s.operation());
+        if(s.recoveryPending()){
+            if(recoveryNotices.add(s.operation())){
+                if(recoveryNotices.size()>2048)recoveryNotices.removeFirst();
+                feedback.optional(presentation,MessageSlot.RESTORE_FAILED,Component.translatable("minebackup.interop.recovery_required",
+                        s.operation().toString().substring(0,8)));
+            }
+            return;
+        }
+        recoveryNotices.remove(s.operation());
         if (Boolean.TRUE.equals(terminalSeen)) return;
         if (announced.size() >= 2048 && terminalSeen == null) announced.pollFirstEntry();
         if (s.state().equals("queued") || s.state().equals("running")) {
@@ -320,8 +333,12 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
         } else if (s.result() != null) {
             announced.put(s.operation(), true);
             boolean ok = s.result().get("outcome").getAsString().equals("succeeded");
-            if (ok)
-                feedback.optional(
+            if (!ok) {
+                String key=s.kind().equals("restore") && "rolledBack".equals(s.disk()) ?
+                        "minebackup.interop.rolled_back" : "minebackup.interop.failed";
+                feedback.optional(presentation,s.kind().equals("restore") ? MessageSlot.RESTORE_FAILED : MessageSlot.BACKUP_FAILED,
+                        Component.translatable(key,s.operation().toString().substring(0,8)));
+            } else feedback.optional(
                         presentation,
                         s.kind().equals("restore")
                                 ? MessageSlot.RESTORE_SUCCEEDED
@@ -362,7 +379,7 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                     pending.info,
                     new RestoreUiMessages(
                             Component.translatable("minebackup.message.restore.rejoining"),
-                            Component.translatable("minebackup.message.restore.success_overlay")),
+                            Component.translatable("committed".equals(snap.disk()) ? "minebackup.message.restore.success_overlay" : "minebackup.interop.original_opened")),
                     () -> live.getAsBoolean() && exit == pending,
                     (ok, reason) -> {
                         boolean correct =
@@ -665,6 +682,9 @@ public final class MineBackupRuntime implements MineBackupApi, AutoCloseable {
                                     Optional.empty());
                         });
     }
+
+    @Override
+    public Optional<UUID> linkedDomainId(){return Optional.ofNullable(link.binding()).map(b->b.endpoint().domain());}
 
     @Override
     public int apiVersion() {

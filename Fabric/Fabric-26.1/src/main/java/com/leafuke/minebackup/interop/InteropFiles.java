@@ -51,36 +51,56 @@ public final class InteropFiles {
                             : Path.of(local);
             return base.resolve("FolderRewind/interop-v3");
         }
-        if(!os.contains("mac"))home=unixHome(home);
+        if (!os.contains("mac")) home = unixHome(home);
         return os.contains("mac")
                 ? home.resolve("Library/Application Support/FolderRewind/interop-v3")
                 : home.resolve(".local/state/folderrewind/interop-v3");
     }
 
-    private static Path unixHome(Path fallback){
+    private static Path unixHome(Path fallback) {
         // The native passwd entry is stable across GUI launchers and systemd environments.
-        try{
-            long uid=((Number)Files.getAttribute(Path.of("/proc/self"),"unix:uid")).longValue();
-            try(var lines=Files.lines(Path.of("/etc/passwd"))){
-                var entry=lines.map(s->s.split(":",-1)).filter(p->p.length==7 && p[2].equals(Long.toString(uid)))
-                        .map(p->Path.of(p[5])).filter(Path::isAbsolute).findFirst();
-                if(entry.isPresent())return entry.get();
+        try {
+            long uid = ((Number) Files.getAttribute(Path.of("/proc/self"), "unix:uid")).longValue();
+            try (var lines = Files.lines(Path.of("/etc/passwd"))) {
+                var entry =
+                        lines.map(s -> s.split(":", -1))
+                                .filter(p -> p.length == 7 && p[2].equals(Long.toString(uid)))
+                                .map(p -> Path.of(p[5]))
+                                .filter(Path::isAbsolute)
+                                .findFirst();
+                if (entry.isPresent()) return entry.get();
             }
             // The VM initializes user.home from the native account database, including NSS.
-        }catch(IOException | UnsupportedOperationException ignored){}
+        } catch (IOException | UnsupportedOperationException ignored) {
+        }
         return fallback;
     }
 
-    public static List<Endpoint> endpoints(Path directory) throws IOException {
-        if (!Files.exists(directory)) return List.of();
-        try (var paths = Files.newDirectoryStream(directory, "*.json")) {
-            var endpoints = new ArrayList<Endpoint>();
-            for (Path path : paths) {
-                if (endpoints.size() >= 64) throw new IOException("too_many_endpoints");
-                endpoints.add(Endpoint.read(path));
+    record Inventory(List<Endpoint> endpoints, boolean incomplete) {}
+
+    static Inventory scan(Path directory) throws IOException {
+        if (!Files.exists(directory)) return new Inventory(List.of(), false);
+        var records = new ArrayList<Endpoint>();
+        boolean incomplete = false;
+        int total = 0;
+        try (var files = Files.newDirectoryStream(directory, "*.json")) {
+            for (Path path : files) {
+                if (++total > 64) {
+                    incomplete = true;
+                    break;
+                }
+                try {
+                    records.add(Endpoint.read(path));
+                } catch (IOException | RuntimeException invalid) {
+                    incomplete = true;
+                }
             }
-            return List.copyOf(endpoints);
         }
+        return new Inventory(List.copyOf(records), incomplete);
+    }
+
+    public static List<Endpoint> endpoints(Path directory) throws IOException {
+        return scan(directory).endpoints();
     }
 
     public static JsonObject readObject(Path file) throws IOException {

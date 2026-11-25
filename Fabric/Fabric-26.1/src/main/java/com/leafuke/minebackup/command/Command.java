@@ -560,6 +560,7 @@ public final class Command {
                                 source.getServer()
                                         .executeIfPossible(
                                                 () -> {
+                                                    if (MineBackup.presented(handle.id())) return;
                                                     if (result.outcome()
                                                                     == BackupResult.Outcome.REJECTED
                                                             || result.outcome()
@@ -575,6 +576,7 @@ public final class Command {
             CommandSourceStack source,
             OperationHandle<RestoreResult> handle) {
         handle.completion().thenAccept(result -> source.getServer().executeIfPossible(() -> {
+            if (MineBackup.presented(handle.id())) return;
             if (result.outcome() == RestoreResult.Outcome.REJECTED
                     || result.outcome() == RestoreResult.Outcome.FAILED) {
                 sendOperationFailure(source, result.failure());

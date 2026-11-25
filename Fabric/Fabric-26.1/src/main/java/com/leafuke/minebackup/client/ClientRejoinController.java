@@ -70,7 +70,8 @@ public final class ClientRejoinController {
                     elapsedTicks = 0;
 
                     if (client.level != null) {
-                        finishFailure(client, "world_changed");
+                        resetRejoinState();
+                        finished.accept(false, "world_changed");
                         return;
                     }
                 });

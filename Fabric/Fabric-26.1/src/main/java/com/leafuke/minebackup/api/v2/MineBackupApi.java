@@ -15,6 +15,9 @@ public interface MineBackupApi {
 
     int apiVersion();
 
+    /** Capture this id with a submitted handle to recheck its original backend even after switching worlds. */
+    default java.util.Optional<java.util.UUID> linkedDomainId(){return java.util.Optional.empty();}
+
     /**
      * Allows callers to recheck a previously issued handle after an uncertain local observation.
      */

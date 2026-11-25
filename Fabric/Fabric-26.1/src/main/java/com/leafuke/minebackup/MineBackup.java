@@ -43,6 +43,8 @@ public final class MineBackup implements ModInitializer {
         return RUNTIME.knotLink();
     }
 
+    public static boolean presented(java.util.UUID operation){return RUNTIME.presented(operation);}
+
     public static MineBackupApi api() {
         return RUNTIME;
     }

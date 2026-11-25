@@ -171,12 +171,13 @@ public final class InteropRestoreSidecar {
                     return;
                 }
             } catch (InteropWire.Rejection refused) {
-                if(refused.code().equals("backend_offline")){
-                    var next=successor(h,instance);
-                    if(next!=null){
-                        instance=next;
-                        // Never ACK the former instance's release into a new process. Recover by reading only.
-                        releaseKnown=true;
+                if (refused.code().equals("backend_offline")) {
+                    var next = successor(h, instance);
+                    if (next != null) {
+                        instance = next;
+                        // Never ACK the former instance's release into a new process. Recover by
+                        // reading only.
+                        releaseKnown = true;
                     }
                 }
                 if (!Set.of("result_unknown", "backend_offline").contains(refused.code()))
@@ -189,17 +190,26 @@ public final class InteropRestoreSidecar {
         result(dir, h, "unconfirmed");
     }
 
-    private static UUID successor(JsonObject h,UUID original)throws Exception{
-        UUID domain=uuid(h,"domainId");
-        var candidates=InteropFiles.endpoints(InteropFiles.root().resolve("endpoints")).stream()
-                .filter(e->e.domain().equals(domain) && e.product().equals(h.get("product").getAsString()) && !e.instance().equals(original)).toList();
-        if(candidates.size()!=1)return null;
-        var candidate=candidates.getFirst();
-        JsonObject hello=call(candidate.instance(),"hello",object(),2000);
-        if(!uuid(hello,"domainId").equals(domain) || !string(hello,"product").equals(candidate.product())
-                || integer(hello,"protocolMajor",3,3)!=3)return null;
+    private static UUID successor(JsonObject h, UUID original) throws Exception {
+        UUID domain = uuid(h, "domainId");
+        var candidates =
+                InteropFiles.endpoints(InteropFiles.root().resolve("endpoints")).stream()
+                        .filter(
+                                e ->
+                                        e.domain().equals(domain)
+                                                && e.product()
+                                                        .equals(h.get("product").getAsString())
+                                                && !e.instance().equals(original))
+                        .toList();
+        if (candidates.size() != 1) return null;
+        var candidate = candidates.getFirst();
+        JsonObject hello = call(candidate.instance(), "hello", object(), 2000);
+        if (!uuid(hello, "domainId").equals(domain)
+                || !string(hello, "product").equals(candidate.product())
+                || integer(hello, "protocolMajor", 3, 3) != 3) return null;
         return candidate.instance();
     }
+
     private static InteropSnapshot snapshot(JsonObject h, UUID instance, UUID op, UUID session)
             throws Exception {
         var snap =
@@ -219,7 +229,16 @@ public final class InteropRestoreSidecar {
         return snap;
     }
 
-    private static void result(Path dir, JsonObject h, String outcome) throws Exception {
+    static void result(Path dir, JsonObject h, String outcome) throws Exception {
+        Path file = dir.resolve("result.json");
+        if (Files.exists(file)) {
+            var existing = InteropFiles.readObject(file);
+            if (!uuid(existing, "operationId").equals(uuid(h, "operationId"))
+                    || !uuid(existing, "handoffId").equals(uuid(h, "handoffId")))
+                throw new IllegalStateException("different_handoff_owner");
+            String known = string(existing, "outcome");
+            if (known.equals("scriptStarted") || known.equals("failed")) return;
+        }
         InteropFiles.writeObject(
                 dir.resolve("result.json"),
                 object(
